@@ -1022,17 +1022,89 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     saveDocument();
   };
 
-  const insertTemplate = (type) => {
-    const templates = {
-      definicion: '<h2>Definicion</h2><blockquote><strong>Concepto:</strong> escribe la definicion aqui.</blockquote><p><strong>Idea clave:</strong> </p>',
-      teorema: '<h2>Teorema</h2><p><strong>Enunciado:</strong> </p><p><strong>Condiciones:</strong> </p><p><strong>Demostracion:</strong> </p>',
-      ejemplo: '<h2>Ejemplo</h2><p><strong>Planteamiento:</strong> </p><p><strong>Solucion:</strong> </p>',
-      ejercicio: '<h2>Ejercicio resuelto</h2><p><strong>Problema:</strong> </p><p><strong>Resolucion:</strong> </p><p><strong>Resultado:</strong> </p>',
-      error: '<h2>Error tipico</h2><p><strong>Error:</strong> </p><p><strong>Como evitarlo:</strong> </p>',
-      duda: '<h2>Duda</h2><p><strong>Pregunta:</strong> </p><p><strong>Respuesta cuando la tenga:</strong> </p>',
-      resumen: '<h2>Resumen final</h2><ul><li>Idea principal</li><li>Formula o regla clave</li><li>Ejercicio tipo</li></ul>',
+  const insertStudyBlock = (type) => {
+    const blocks = {
+      definicion: {
+        title: "Definicion",
+        tone: "blue",
+        body: "Explica aqui el concepto teorico y sus partes importantes.",
+      },
+      idea: {
+        title: "Idea clave",
+        tone: "green",
+        body: "Resume en pocas lineas lo mas importante de este apartado.",
+      },
+      algoritmo: {
+        title: "Algoritmo / Pseudocodigo",
+        tone: "purple",
+        body: "Escribe los pasos del algoritmo o el pseudocodigo principal.",
+      },
+      complejidad: {
+        title: "Complejidad",
+        tone: "amber",
+        body: "Temporal: O(...). Espacial: O(...). Explica por que.",
+      },
+      recurrencia: {
+        title: "Caso base / Recurrencia",
+        tone: "rose",
+        body: "Caso base: ...\nRecurrencia: ...",
+      },
+      ejemplo: {
+        title: "Ejemplo",
+        tone: "cyan",
+        body: "Planteamiento, desarrollo paso a paso y resultado.",
+      },
+      error: {
+        title: "Error tipico",
+        tone: "orange",
+        body: "Describe el fallo frecuente y como evitarlo en el examen.",
+      },
+      pregunta: {
+        title: "Pregunta de examen",
+        tone: "indigo",
+        body: "Escribe una posible pregunta teorica importante y su respuesta.",
+      },
+      duda: {
+        title: "Duda",
+        tone: "slate",
+        body: "Apunta que no entiendes y que necesitas revisar.",
+      },
     };
-    insertHtml(templates[type]);
+    const block = blocks[type];
+    if (!block) return;
+    insertHtml(`
+      <section class="study-block study-block-${block.tone}" contenteditable="false">
+        <div class="study-block-label">${escapeHtml(block.title)}</div>
+        <div class="study-block-body" contenteditable="true">${escapeHtml(block.body).replace(/\n/g, "<br>")}</div>
+      </section><p><br></p>
+    `);
+  };
+
+  const insertCodeBlock = (language) => {
+    const labels = {
+      cpp: "C++",
+      javascript: "JavaScript",
+      htmlcss: "HTML / CSS",
+      python: "Python",
+      php: "PHP",
+      pseudocode: "Pseudocodigo",
+      text: "Texto plano",
+    };
+    const label = labels[language];
+    if (!label) return;
+    insertHtml(`
+      <section class="study-code-block" contenteditable="false" data-code-language="${escapeHtml(label)}">
+        <div class="study-code-header">
+          <span><strong>Codigo</strong> · ${escapeHtml(label)}</span>
+          <span class="study-code-actions">
+            <button type="button" data-code-action="copy" contenteditable="false">Copiar</button>
+            <button type="button" data-code-action="edit" contenteditable="false">Editar</button>
+            <button type="button" data-code-action="delete" contenteditable="false">Eliminar</button>
+          </span>
+        </div>
+        <pre class="study-code-content" contenteditable="true">Escribe aqui tu codigo...</pre>
+      </section><p><br></p>
+    `);
   };
 
   const createQuestionFromSelection = () => {
@@ -1081,6 +1153,31 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   };
 
   const handleEditorClick = (event) => {
+    const codeAction = event.target?.closest?.("[data-code-action]");
+    if (codeAction) {
+      event.preventDefault();
+      const codeBlock = codeAction.closest(".study-code-block");
+      const codeContent = codeBlock?.querySelector(".study-code-content");
+      const action = codeAction.dataset.codeAction;
+      if (action === "copy") {
+        navigator.clipboard?.writeText(codeContent?.innerText || "");
+      }
+      if (action === "edit" && codeContent) {
+        codeContent.focus();
+        const range = document.createRange();
+        range.selectNodeContents(codeContent);
+        range.collapse(false);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        savedRangeRef.current = range.cloneRange();
+      }
+      if (action === "delete") {
+        codeBlock?.remove();
+        saveDocument();
+      }
+      return;
+    }
     if (event.target?.tagName === "IMG") {
       selectedImage?.classList.remove("selected-editor-image");
       event.target.classList.add("selected-editor-image");
@@ -1185,6 +1282,46 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
         <EditorTool icon={ListOrdered} label="Lista numerada" onClick={() => runCommand("insertOrderedList")} />
         <EditorTool icon={Quote} label="Cita" onClick={() => runCommand("formatBlock", "blockquote")} />
         <EditorTool icon={Image} label="Imagen dentro del apunte" onClick={() => fileInputRef.current?.click()} />
+        <select
+          defaultValue=""
+          onMouseDown={saveSelection}
+          onFocus={saveSelection}
+          onChange={(event) => {
+            insertStudyBlock(event.target.value);
+            event.target.value = "";
+          }}
+          className="h-9 rounded-lg border border-slate-900/10 bg-white px-3 text-sm font-black text-slate-700 shadow-sm outline-none"
+        >
+          <option value="" disabled>Bloques</option>
+          <option value="definicion">Definicion</option>
+          <option value="idea">Idea clave</option>
+          <option value="algoritmo">Algoritmo / Pseudocodigo</option>
+          <option value="complejidad">Complejidad</option>
+          <option value="recurrencia">Caso base / Recurrencia</option>
+          <option value="ejemplo">Ejemplo</option>
+          <option value="error">Error tipico</option>
+          <option value="pregunta">Pregunta de examen</option>
+          <option value="duda">Duda</option>
+        </select>
+        <select
+          defaultValue=""
+          onMouseDown={saveSelection}
+          onFocus={saveSelection}
+          onChange={(event) => {
+            insertCodeBlock(event.target.value);
+            event.target.value = "";
+          }}
+          className="h-9 rounded-lg border border-slate-900/10 bg-[#172033] px-3 text-sm font-black text-white shadow-sm outline-none"
+        >
+          <option value="" disabled>Insertar codigo</option>
+          <option value="cpp">C++</option>
+          <option value="javascript">JavaScript</option>
+          <option value="htmlcss">HTML / CSS</option>
+          <option value="python">Python</option>
+          <option value="php">PHP</option>
+          <option value="pseudocode">Pseudocodigo</option>
+          <option value="text">Texto plano</option>
+        </select>
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={createQuestionFromSelection} className="h-9 rounded-lg bg-[#dcebdc] px-3 text-sm font-black text-[#1f5d55] shadow-sm hover:bg-[#cde2cd]">
           Crear pregunta
         </button>

@@ -132,6 +132,133 @@ select {
   color: #475569;
 }
 
+.study-document .study-block {
+  margin: 1.25rem 0;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-left-width: 5px;
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+}
+
+.study-document .study-block-label {
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.study-document .study-block-body {
+  min-height: 3rem;
+  border-radius: 6px;
+  color: #172033;
+  outline: none;
+}
+
+.study-document .study-block-body:focus,
+.study-document .study-code-content:focus {
+  box-shadow: 0 0 0 4px rgba(47, 111, 115, 0.14);
+}
+
+.study-document .study-block-blue {
+  border-left-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.study-document .study-block-green {
+  border-left-color: #22c55e;
+  background: #f0fdf4;
+}
+
+.study-document .study-block-purple {
+  border-left-color: #8b5cf6;
+  background: #f5f3ff;
+}
+
+.study-document .study-block-amber {
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.study-document .study-block-rose {
+  border-left-color: #fb7185;
+  background: #fff1f2;
+}
+
+.study-document .study-block-cyan {
+  border-left-color: #06b6d4;
+  background: #ecfeff;
+}
+
+.study-document .study-block-orange {
+  border-left-color: #f97316;
+  background: #fff7ed;
+}
+
+.study-document .study-block-indigo {
+  border-left-color: #6366f1;
+  background: #eef2ff;
+}
+
+.study-document .study-block-slate {
+  border-left-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.study-document .study-code-block {
+  margin: 1.25rem 0;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  background: #0f172a;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+}
+
+.study-document .study-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.7rem 0.85rem;
+  color: #e2e8f0;
+  font-size: 0.78rem;
+}
+
+.study-document .study-code-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.study-document .study-code-actions button {
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.3rem 0.5rem;
+  color: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.study-document .study-code-actions button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.study-document .study-code-content {
+  min-height: 8rem;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre;
+  background: #111827;
+  padding: 1rem;
+  color: #dbeafe;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  outline: none;
+}
+
 .study-document img {
   margin: 1rem 0;
   max-width: 100%;
