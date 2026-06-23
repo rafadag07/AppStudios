@@ -403,11 +403,21 @@ function Shell({ children, view, setView, subjects, query, setQuery, openModal, 
         </header>
         <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">{children}</div>
       </main>
+      <div className="fixed bottom-5 right-4 z-50 md:hidden">
+        <CloudSyncButton
+          user={cloudUser}
+          status={syncStatus}
+          onSignIn={onCloudSignIn}
+          onCodeSignIn={onCodeSignIn}
+          onSignOut={onCloudSignOut}
+          mobile
+        />
+      </div>
     </div>
   );
 }
 
-function CloudSyncButton({ user, status, onSignIn, onCodeSignIn, onSignOut, full = false }) {
+function CloudSyncButton({ user, status, onSignIn, onCodeSignIn, onSignOut, full = false, mobile = false }) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState(user?.email || "");
   const [syncCode, setSyncCode] = useState("");
@@ -438,7 +448,7 @@ function CloudSyncButton({ user, status, onSignIn, onCodeSignIn, onSignOut, full
     <div className="relative">
       <button
         onClick={() => setOpen((value) => !value)}
-        className={`${full ? "inline-flex w-full justify-center" : "hidden md:inline-flex"} h-11 items-center gap-2 rounded-lg px-4 text-sm font-black shadow-sm ${
+        className={`${full ? "inline-flex w-full justify-center" : mobile ? "inline-flex" : "hidden md:inline-flex"} h-11 items-center gap-2 rounded-lg px-4 text-sm font-black shadow-sm ${
           user ? "bg-[#dcebdc] text-[#1f5d55]" : "bg-white text-slate-700"
         }`}
         title="Sincronizacion"
@@ -447,7 +457,7 @@ function CloudSyncButton({ user, status, onSignIn, onCodeSignIn, onSignOut, full
         {user ? "Sync" : "Nube"}
       </button>
       {open && (
-        <div className="absolute right-0 top-12 z-50 w-80 rounded-lg border border-slate-900/10 bg-white p-4 shadow-soft">
+        <div className={`${mobile ? "fixed bottom-20 left-4 right-4" : "absolute right-0 top-12 w-80"} z-50 rounded-lg border border-slate-900/10 bg-white p-4 shadow-soft`}>
           <div className="flex items-start gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-lg bg-[#dcebdc] text-[#1f5d55]">
               <Cloud size={19} />
