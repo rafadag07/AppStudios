@@ -1129,7 +1129,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
 
   return (
     <section className={`${fullscreen ? "fixed inset-0 z-50 overflow-auto rounded-none" : "overflow-hidden rounded-lg"} border border-slate-900/10 bg-white shadow-soft`}>
-      <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b border-slate-900/10 bg-slate-50/95 px-3 py-3 backdrop-blur">
+      <div className={`${fullscreen ? "fixed left-0 right-0 top-0" : "fixed left-0 right-0 top-[68px] xl:left-72"} z-40 flex flex-wrap items-center gap-2 border-b border-slate-900/10 bg-slate-50/95 px-3 py-3 shadow-sm backdrop-blur md:px-8`}>
         <EditorTool icon={Heading1} label="Título" onClick={() => runCommand("formatBlock", "h1")} />
         <EditorTool icon={Heading2} label="Subtítulo 1" onClick={() => runCommand("formatBlock", "h2")} />
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("formatBlock", "h3")} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">S2</button>
@@ -1154,9 +1154,9 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
         <EditorTool icon={fullscreen ? Minimize2 : Maximize2} label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} onClick={() => setFullscreen((value) => !value)} />
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={addInlineImage} />
       </div>
-      <div ref={editorFrameRef} className={`relative grid gap-4 bg-[#f3efe6] px-3 py-5 md:px-8 ${fullscreen ? "xl:grid-cols-[240px_minmax(0,1fr)]" : "xl:grid-cols-[220px_minmax(0,1fr)]"}`}>
+      <div ref={editorFrameRef} className={`relative grid gap-4 bg-[#f3efe6] px-3 pb-5 pt-24 md:px-8 ${fullscreen ? "min-h-screen xl:grid-cols-[240px_minmax(0,1fr)] xl:pt-28" : "xl:grid-cols-[220px_minmax(0,1fr)]"}`}>
         <aside className="hidden xl:block">
-          <div className="sticky top-20 rounded-lg border border-slate-900/10 bg-white p-3 shadow-sm">
+          <div className={`${fullscreen ? "fixed left-8 top-28 w-56" : "fixed left-[calc(18rem+2rem)] top-[170px] w-56"} max-h-[calc(100vh-190px)] overflow-auto rounded-lg border border-slate-900/10 bg-white p-3 shadow-sm`}>
             <h3 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-slate-400">Indice</h3>
             {headings.length === 0 ? (
               <p className="text-xs font-bold text-slate-400">Sin titulos.</p>
