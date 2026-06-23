@@ -42,6 +42,23 @@ export async function fetchCloudData(userId) {
   return data || null;
 }
 
+export async function fetchSharedSpace(syncId) {
+  if (!supabase || !syncId) return null;
+  const { data, error } = await supabase.from("campus_sync_spaces").select("data, updated_at").eq("sync_id", syncId).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+export async function saveSharedSpace(syncId, data) {
+  if (!supabase || !syncId) return;
+  const { error } = await supabase.from("campus_sync_spaces").upsert({
+    sync_id: syncId,
+    data,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
 export async function saveCloudData(userId, data) {
   if (!supabase || !userId) return;
   const { error } = await supabase.from("campus_profiles").upsert({
@@ -66,6 +83,31 @@ export function subscribeToCloudData(userId, onChange) {
   return () => {
     supabase.removeChannel(channel);
   };
+}
+
+export function subscribeToSharedSpace(syncId, onChange) {
+  if (!supabase || !syncId) return () => {};
+  const channel = supabase
+    .channel(`campus-sync-space-${syncId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "campus_sync_spaces", filter: `sync_id=eq.${syncId}` },
+      (payload) => onChange(payload.new)
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+export function createSyncCode() {
+  const part = () => Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `CAMPUS-${part()}-${part()}`;
+}
+
+export function normalizeSyncCode(value = "") {
+  return value.trim().replace(/\s+/g, "-").toUpperCase();
 }
 
 export async function uploadCloudFile(fileId, file) {

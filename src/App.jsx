@@ -44,13 +44,18 @@ import {
 import { STORAGE_KEY, createId, initialData } from "./data/schema";
 import { getStoredFile, saveStoredFile } from "./data/fileStore";
 import {
+  createSyncCode,
   fetchCloudData,
+  fetchSharedSpace,
   getCurrentSession,
   isSupabaseConfigured,
+  normalizeSyncCode,
   saveCloudData,
+  saveSharedSpace,
   signInWithEmail,
   signOutCloud,
   subscribeToCloudData,
+  subscribeToSharedSpace,
   supabase,
 } from "./data/supabaseClient";
 
@@ -58,6 +63,7 @@ const days = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "do
 const statuses = ["nada", "medio", "estudiado"];
 const priorities = ["baja", "media", "alta"];
 const resourceTypes = ["link", "pdf", "video", "libro", "otro"];
+const SYNC_CODE_KEY = "summer-study-campus-sync-code";
 
 const iconMap = {
   network: Network,
@@ -113,23 +119,29 @@ function App() {
   const lastCloudJsonRef = useRef("");
   const skipCloudSaveRef = useRef(false);
 
+  const applyRemoteData = (remoteData, status = "Sincronizado") => {
+    migrateSubjectQuestions(remoteData);
+    skipCloudSaveRef.current = true;
+    lastCloudJsonRef.current = JSON.stringify(remoteData);
+    setData(remoteData);
+    setSyncStatus(status);
+  };
+
   const loadCloudSession = async (session) => {
+    const savedCode = localStorage.getItem(SYNC_CODE_KEY);
+    if (savedCode) return;
     if (!session?.user) {
       setCloudUser(null);
       setSyncStatus(isSupabaseConfigured ? "Sin iniciar sesion" : "Modo local");
       return;
     }
 
-    setCloudUser(session.user);
+    setCloudUser({ id: session.user.id, email: session.user.email, mode: "email" });
     setSyncStatus("Descargando datos");
     try {
       const remote = await fetchCloudData(session.user.id);
       if (remote?.data) {
-        migrateSubjectQuestions(remote.data);
-        skipCloudSaveRef.current = true;
-        lastCloudJsonRef.current = JSON.stringify(remote.data);
-        setData(remote.data);
-        setSyncStatus("Sincronizado");
+        applyRemoteData(remote.data);
       } else {
         await saveCloudData(session.user.id, latestDataRef.current);
         lastCloudJsonRef.current = JSON.stringify(latestDataRef.current);
@@ -147,7 +159,27 @@ function App() {
     setSyncStatus("Revisa tu correo");
   };
 
+  const connectWithSyncCode = async (rawCode) => {
+    const syncId = normalizeSyncCode(rawCode || createSyncCode());
+    if (!/^CAMPUS-[A-Z0-9]{6}-[A-Z0-9]{6}$/.test(syncId)) {
+      throw new Error("Usa un codigo con formato CAMPUS-XXXXXX-XXXXXX.");
+    }
+    setSyncStatus("Conectando codigo");
+    const remote = await fetchSharedSpace(syncId);
+    localStorage.setItem(SYNC_CODE_KEY, syncId);
+    setCloudUser({ id: syncId, email: syncId, mode: "code" });
+    if (remote?.data) {
+      applyRemoteData(remote.data);
+    } else {
+      await saveSharedSpace(syncId, latestDataRef.current);
+      lastCloudJsonRef.current = JSON.stringify(latestDataRef.current);
+      setSyncStatus("Sincronizado");
+    }
+    return syncId;
+  };
+
   const disconnectCloud = async () => {
+    localStorage.removeItem(SYNC_CODE_KEY);
     await signOutCloud();
     setCloudUser(null);
     setSyncStatus("Sin iniciar sesion");
@@ -160,6 +192,11 @@ function App() {
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return undefined;
     let active = true;
+    const savedCode = localStorage.getItem(SYNC_CODE_KEY);
+    if (savedCode) connectWithSyncCode(savedCode).catch((error) => {
+      console.error(error);
+      setSyncStatus("Error de sincronizacion");
+    });
     getCurrentSession().then((session) => active && loadCloudSession(session));
     const {
       data: { subscription },
@@ -174,7 +211,8 @@ function App() {
 
   useEffect(() => {
     if (!cloudUser) return undefined;
-    return subscribeToCloudData(cloudUser.id, (row) => {
+    const subscribe = cloudUser.mode === "code" ? subscribeToSharedSpace : subscribeToCloudData;
+    return subscribe(cloudUser.id, (row) => {
       if (!row?.data) return;
       const json = JSON.stringify(row.data);
       if (json === lastCloudJsonRef.current) return;
@@ -198,7 +236,8 @@ function App() {
     setSyncStatus("Guardando en la nube");
     const timer = window.setTimeout(async () => {
       try {
-        await saveCloudData(cloudUser.id, data);
+        if (cloudUser.mode === "code") await saveSharedSpace(cloudUser.id, data);
+        else await saveCloudData(cloudUser.id, data);
         lastCloudJsonRef.current = json;
         setSyncStatus("Sincronizado");
       } catch (error) {
@@ -207,7 +246,7 @@ function App() {
       }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [data, cloudUser?.id]);
+  }, [data, cloudUser?.id, cloudUser?.mode]);
 
   const allThemes = useMemo(
     () => data.subjects.flatMap((subject) => subject.themes.map((theme) => ({ ...theme, subject }))),
@@ -238,6 +277,7 @@ function App() {
         cloudUser={cloudUser}
         syncStatus={syncStatus}
         onCloudSignIn={requestCloudSignIn}
+        onCodeSignIn={connectWithSyncCode}
         onCloudSignOut={disconnectCloud}
       >
         {view.page === "dashboard" && (
@@ -278,7 +318,7 @@ function App() {
   );
 }
 
-function Shell({ children, view, setView, subjects, query, setQuery, openModal, cloudUser, syncStatus, onCloudSignIn, onCloudSignOut }) {
+function Shell({ children, view, setView, subjects, query, setQuery, openModal, cloudUser, syncStatus, onCloudSignIn, onCodeSignIn, onCloudSignOut }) {
   const nav = [
     ["dashboard", "Campus", Sparkles],
     ["subjects", "Asignaturas", BookOpen],
@@ -348,7 +388,7 @@ function Shell({ children, view, setView, subjects, query, setQuery, openModal, 
             <QuickButton icon={ListChecks} label="Tarea" onClick={() => openModal({ type: "task" })} />
             <QuickButton icon={LinkIcon} label="Recurso" onClick={() => openModal({ type: "resource" })} />
             <QuickButton icon={FileText} label="Apunte" onClick={() => openModal({ type: "quick-note" })} />
-            <CloudSyncButton user={cloudUser} status={syncStatus} onSignIn={onCloudSignIn} onSignOut={onCloudSignOut} />
+            <CloudSyncButton user={cloudUser} status={syncStatus} onSignIn={onCloudSignIn} onCodeSignIn={onCodeSignIn} onSignOut={onCloudSignOut} />
           </div>
         </header>
         <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">{children}</div>
@@ -357,9 +397,10 @@ function Shell({ children, view, setView, subjects, query, setQuery, openModal, 
   );
 }
 
-function CloudSyncButton({ user, status, onSignIn, onSignOut }) {
+function CloudSyncButton({ user, status, onSignIn, onCodeSignIn, onSignOut }) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState(user?.email || "");
+  const [syncCode, setSyncCode] = useState("");
   const [error, setError] = useState("");
 
   const submit = async (event) => {
@@ -369,6 +410,17 @@ function CloudSyncButton({ user, status, onSignIn, onSignOut }) {
       await onSignIn(email);
     } catch (syncError) {
       setError(syncError.message || "No se ha podido iniciar sesion.");
+    }
+  };
+
+  const connectCode = async (event) => {
+    event.preventDefault();
+    setError("");
+    try {
+      const code = await onCodeSignIn(syncCode || createSyncCode());
+      setSyncCode(code);
+    } catch (syncError) {
+      setError(syncError.message || "No se ha podido conectar con ese codigo.");
     }
   };
 
@@ -402,21 +454,31 @@ function CloudSyncButton({ user, status, onSignIn, onSignOut }) {
             </p>
           ) : user ? (
             <div className="mt-4 space-y-3">
-              <p className="truncate rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600">{user.email}</p>
+              <p className="truncate rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600">{user.mode === "code" ? `Codigo: ${user.email}` : user.email}</p>
               <button onClick={onSignOut} className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-100 px-3 text-sm font-black text-slate-700">
                 <LogOut size={16} /> Cerrar sesion
               </button>
             </div>
           ) : (
-            <form onSubmit={submit} className="mt-4 space-y-3">
-              <label className="block text-xs font-black uppercase tracking-[0.16em] text-slate-400">Email</label>
-              <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required className="input" placeholder="tu@email.com" />
-              <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#172033] px-3 text-sm font-black text-white">
-                <Mail size={16} /> Enviar enlace
-              </button>
+            <div className="mt-4 space-y-4">
+              <form onSubmit={connectCode} className="space-y-3 rounded-lg bg-slate-50 p-3">
+                <label className="block text-xs font-black uppercase tracking-[0.16em] text-slate-400">Codigo de sincronizacion</label>
+                <input value={syncCode} onChange={(event) => setSyncCode(event.target.value)} className="input" placeholder="CAMPUS-XXXXXX-XXXXXX" />
+                <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#172033] px-3 text-sm font-black text-white">
+                  <Cloud size={16} /> Conectar codigo
+                </button>
+                <p className="text-xs text-slate-500">Dejalo vacio para crear uno nuevo. Usa el mismo codigo en tus otros dispositivos.</p>
+              </form>
+
+              <form onSubmit={submit} className="space-y-3 border-t border-slate-200 pt-4">
+                <label className="block text-xs font-black uppercase tracking-[0.16em] text-slate-400">Email</label>
+                <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" className="input" placeholder="tu@email.com" />
+                <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-100 px-3 text-sm font-black text-slate-700">
+                  <Mail size={16} /> Enviar enlace
+                </button>
+              </form>
               {error && <p className="text-sm font-bold text-red-600">{error}</p>}
-              <p className="text-xs text-slate-500">Te llegara un enlace de acceso. Al entrar desde otro dispositivo con el mismo email, se sincroniza todo.</p>
-            </form>
+            </div>
           )}
         </div>
       )}
