@@ -969,6 +969,8 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [imageWidth, setImageWidth] = useState(70);
   const [imageTools, setImageTools] = useState(null);
+  const [selectedBlock, setSelectedBlock] = useState(null);
+  const [blockTools, setBlockTools] = useState(null);
   const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
@@ -1073,7 +1075,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     const block = blocks[type];
     if (!block) return;
     insertHtml(`
-      <section class="study-block study-block-${block.tone}" contenteditable="false">
+      <section class="study-block study-block-${block.tone} study-content-normal" contenteditable="false" data-study-block="true" data-block-size="normal">
         <div class="study-block-label">${escapeHtml(block.title)}</div>
         <div class="study-block-body" contenteditable="true">${escapeHtml(block.body).replace(/\n/g, "<br>")}</div>
       </section><p><br></p>
@@ -1093,7 +1095,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     const label = labels[language];
     if (!label) return;
     insertHtml(`
-      <section class="study-code-block" contenteditable="false" data-code-language="${escapeHtml(label)}">
+      <section class="study-code-block study-content-normal" contenteditable="false" data-code-language="${escapeHtml(label)}" data-study-block="true" data-block-size="normal">
         <div class="study-code-header">
           <span><strong>Codigo</strong> · ${escapeHtml(label)}</span>
           <span class="study-code-actions">
@@ -1178,18 +1180,36 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
       }
       return;
     }
+    const block = event.target?.closest?.("[data-study-block]");
+    if (block && editorRef.current?.contains(block)) {
+      selectedImage?.classList.remove("selected-editor-image");
+      selectedBlock?.classList.remove("selected-study-block");
+      block.classList.add("selected-study-block");
+      setSelectedImage(null);
+      setImageTools(null);
+      setSelectedBlock(block);
+      updateBlockToolsPosition(block);
+      saveSelection();
+      return;
+    }
     if (event.target?.tagName === "IMG") {
       selectedImage?.classList.remove("selected-editor-image");
+      selectedBlock?.classList.remove("selected-study-block");
       event.target.classList.add("selected-editor-image");
       setSelectedImage(event.target);
+      setSelectedBlock(null);
+      setBlockTools(null);
       const width = Number.parseInt(event.target.style.width, 10);
       setImageWidth(Number.isFinite(width) ? width : 70);
       updateImageToolsPosition(event.target);
       return;
     }
     selectedImage?.classList.remove("selected-editor-image");
+    selectedBlock?.classList.remove("selected-study-block");
     setSelectedImage(null);
     setImageTools(null);
+    setSelectedBlock(null);
+    setBlockTools(null);
     saveSelection();
   };
 
@@ -1248,6 +1268,23 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     saveDocument();
   };
 
+  const resizeSelectedBlock = (size) => {
+    if (!selectedBlock) return;
+    selectedBlock.classList.remove("study-content-small", "study-content-normal", "study-content-large");
+    selectedBlock.classList.add(`study-content-${size}`);
+    selectedBlock.dataset.blockSize = size;
+    window.requestAnimationFrame(() => updateBlockToolsPosition(selectedBlock));
+    saveDocument();
+  };
+
+  const deleteSelectedBlock = () => {
+    if (!selectedBlock) return;
+    selectedBlock.remove();
+    setSelectedBlock(null);
+    setBlockTools(null);
+    saveDocument();
+  };
+
   const addImageCaption = () => {
     if (!selectedImage) return;
     const caption = document.createElement("p");
@@ -1265,6 +1302,17 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
       left: Math.max(12, imageRect.left - frameRect.left),
       top: Math.max(12, imageRect.top - frameRect.top - 54),
       width: imageRect.width,
+    });
+  };
+
+  const updateBlockToolsPosition = (block) => {
+    if (!block || !editorFrameRef.current) return;
+    const blockRect = block.getBoundingClientRect();
+    const frameRect = editorFrameRef.current.getBoundingClientRect();
+    setBlockTools({
+      left: Math.max(12, blockRect.left - frameRect.left),
+      top: Math.max(12, blockRect.top - frameRect.top - 54),
+      width: blockRect.width,
     });
   };
 
@@ -1358,6 +1406,18 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
             <EditorTool icon={Trash2} label="Borrar imagen" onClick={deleteSelectedImage} />
           </div>
         )}
+        {selectedBlock && blockTools && (
+          <div
+            className="absolute z-10 flex flex-wrap items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 p-2 shadow-soft backdrop-blur"
+            style={{ left: blockTools.left, top: blockTools.top, maxWidth: "calc(100% - 24px)" }}
+          >
+            <span className="text-xs font-black uppercase text-slate-500">Bloque</span>
+            <button type="button" onClick={() => resizeSelectedBlock("small")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">Pequeño</button>
+            <button type="button" onClick={() => resizeSelectedBlock("normal")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">Normal</button>
+            <button type="button" onClick={() => resizeSelectedBlock("large")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">Grande</button>
+            <EditorTool icon={Trash2} label="Eliminar bloque" onClick={deleteSelectedBlock} />
+          </div>
+        )}
         <div
           ref={editorRef}
           contentEditable
@@ -1370,7 +1430,10 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
           onPaste={handlePaste}
           onKeyUp={saveSelection}
           onMouseUp={saveSelection}
-          onScroll={() => selectedImage && updateImageToolsPosition(selectedImage)}
+          onScroll={() => {
+            if (selectedImage) updateImageToolsPosition(selectedImage);
+            if (selectedBlock) updateBlockToolsPosition(selectedBlock);
+          }}
           className={`study-document mx-auto rounded bg-white text-slate-900 shadow-soft outline-none ${fullscreen ? "min-h-[calc(100vh-132px)] w-full max-w-[1120px] px-8 py-9 md:px-16 md:py-14" : "min-h-[920px] w-full max-w-none px-8 py-9 md:px-16 md:py-14"}`}
         />
       </div>
