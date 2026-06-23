@@ -356,6 +356,16 @@ function Shell({ children, view, setView, subjects, query, setQuery, openModal, 
             </button>
           ))}
         </nav>
+        <div className="mt-4">
+          <CloudSyncButton
+            user={cloudUser}
+            status={syncStatus}
+            onSignIn={onCloudSignIn}
+            onCodeSignIn={onCodeSignIn}
+            onSignOut={onCloudSignOut}
+            full
+          />
+        </div>
         <div className="mt-8">
           <p className="mb-3 text-xs font-black uppercase tracking-[0.18em] text-slate-400">Asignaturas</p>
           <div className="space-y-2">
@@ -397,7 +407,7 @@ function Shell({ children, view, setView, subjects, query, setQuery, openModal, 
   );
 }
 
-function CloudSyncButton({ user, status, onSignIn, onCodeSignIn, onSignOut }) {
+function CloudSyncButton({ user, status, onSignIn, onCodeSignIn, onSignOut, full = false }) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState(user?.email || "");
   const [syncCode, setSyncCode] = useState("");
@@ -428,7 +438,7 @@ function CloudSyncButton({ user, status, onSignIn, onCodeSignIn, onSignOut }) {
     <div className="relative">
       <button
         onClick={() => setOpen((value) => !value)}
-        className={`hidden h-11 items-center gap-2 rounded-lg px-4 text-sm font-black shadow-sm md:inline-flex ${
+        className={`${full ? "inline-flex w-full justify-center" : "hidden md:inline-flex"} h-11 items-center gap-2 rounded-lg px-4 text-sm font-black shadow-sm ${
           user ? "bg-[#dcebdc] text-[#1f5d55]" : "bg-white text-slate-700"
         }`}
         title="Sincronizacion"
