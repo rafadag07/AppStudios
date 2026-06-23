@@ -1154,9 +1154,9 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
         <EditorTool icon={fullscreen ? Minimize2 : Maximize2} label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} onClick={() => setFullscreen((value) => !value)} />
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={addInlineImage} />
       </div>
-      <div ref={editorFrameRef} className={`relative grid gap-4 bg-[#f3efe6] px-3 pb-5 pt-24 md:px-8 ${fullscreen ? "min-h-screen xl:grid-cols-[240px_minmax(0,1fr)] xl:pt-28" : "xl:grid-cols-[220px_minmax(0,1fr)]"}`}>
+      <div ref={editorFrameRef} className={`relative grid gap-5 bg-[#f3efe6] px-3 pb-5 pt-24 md:px-8 ${fullscreen ? "min-h-screen xl:grid-cols-[260px_minmax(0,1fr)] xl:pt-28" : "xl:grid-cols-[260px_minmax(0,1fr)]"}`}>
         <aside className="hidden xl:block">
-          <div className={`${fullscreen ? "fixed left-8 top-28 w-56" : "fixed left-[calc(18rem+2rem)] top-[170px] w-56"} max-h-[calc(100vh-190px)] overflow-auto rounded-lg border border-slate-900/10 bg-white p-3 shadow-sm`}>
+          <div className="sticky top-[150px] max-h-[calc(100vh-170px)] overflow-auto rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
             <h3 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-slate-400">Indice</h3>
             {headings.length === 0 ? (
               <p className="text-xs font-bold text-slate-400">Sin titulos.</p>
@@ -1210,7 +1210,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
           onKeyUp={saveSelection}
           onMouseUp={saveSelection}
           onScroll={() => selectedImage && updateImageToolsPosition(selectedImage)}
-          className={`study-document mx-auto rounded bg-white text-slate-900 shadow-soft outline-none ${fullscreen ? "study-document-full min-h-[calc(100vh-118px)] w-full max-w-7xl px-10 py-10 md:px-20 md:py-16" : "min-h-[920px] w-full max-w-5xl px-8 py-9 md:px-16 md:py-14"}`}
+          className={`study-document mx-auto rounded bg-white text-slate-900 shadow-soft outline-none ${fullscreen ? "study-document-full min-h-[calc(100vh-118px)] w-full max-w-none px-10 py-10 md:px-20 md:py-16" : "min-h-[920px] w-full max-w-none px-8 py-9 md:px-16 md:py-14"}`}
         />
       </div>
     </section>
