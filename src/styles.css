@@ -1,0 +1,175 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #172033;
+  background: #f7f4ee;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.campus-grid {
+  background-image:
+    linear-gradient(rgba(23, 32, 51, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 32, 51, 0.045) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(23, 32, 51, 0.2);
+  border-radius: 999px;
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-slate-900/10 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none ring-[#2f6f73]/20 transition focus:ring-4;
+  }
+}
+
+.study-document {
+  line-height: 1.75;
+  font-size: 1.03rem;
+  overflow-wrap: anywhere;
+}
+
+.study-document:empty::before {
+  content: "Empieza a escribir tus apuntes aqui...";
+  color: #94a3b8;
+}
+
+.study-document h1 {
+  margin: 0 0 1rem;
+  font-size: 2.25rem;
+  line-height: 1.1;
+  font-weight: 900;
+}
+
+.study-document h2 {
+  margin: 2rem 0 0.75rem;
+  font-size: 1.45rem;
+  line-height: 1.25;
+  font-weight: 900;
+}
+
+.study-document h3 {
+  margin: 1.35rem 0 0.4rem;
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+.study-document h4 {
+  margin: 1rem 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 900;
+  color: #475569;
+}
+
+.study-document p {
+  margin: 0.75rem 0;
+}
+
+.study-document ul,
+.study-document ol {
+  margin: 0.75rem 0 0.75rem 1.5rem;
+  padding-left: 1rem;
+}
+
+.study-document ul {
+  list-style: disc;
+}
+
+.study-document ol {
+  list-style: decimal;
+}
+
+.study-document blockquote {
+  margin: 1.25rem 0;
+  border-left: 4px solid #f4c36b;
+  background: #fff8e8;
+  padding: 0.75rem 1rem;
+  color: #475569;
+}
+
+.study-document img {
+  margin: 1rem 0;
+  max-width: 100%;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(31, 41, 55, 0.14);
+  cursor: pointer;
+}
+
+.study-document img.selected-editor-image {
+  outline: 4px solid rgba(47, 111, 115, 0.35);
+  outline-offset: 4px;
+}
+
+.study-document .auto-toc {
+  margin: 0 0 2rem;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 1rem 1.25rem;
+}
+
+.study-document .auto-toc h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.study-document .auto-toc a {
+  display: block;
+  border-bottom: 1px dotted rgba(15, 23, 42, 0.2);
+  padding: 0.25rem 0;
+  color: #1f5d55;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.study-document .auto-toc .toc-level-2 {
+  padding-left: 1rem;
+  font-weight: 700;
+}
+
+.study-document .auto-toc .toc-level-3 {
+  padding-left: 2rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.study-document .auto-toc .toc-level-4 {
+  padding-left: 3rem;
+  font-size: 0.9rem;
+  color: #64748b;
+}
+
+.study-document .auto-toc .toc-empty {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
