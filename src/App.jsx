@@ -1234,7 +1234,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
           onKeyUp={saveSelection}
           onMouseUp={saveSelection}
           onScroll={() => selectedImage && updateImageToolsPosition(selectedImage)}
-          className={`study-document mx-auto rounded bg-white text-slate-900 shadow-soft outline-none ${fullscreen ? "study-document-full min-h-[calc(100vh-118px)] w-full max-w-none px-10 py-10 md:px-20 md:py-16" : "min-h-[920px] w-full max-w-none px-8 py-9 md:px-16 md:py-14"}`}
+          className={`study-document mx-auto rounded bg-white text-slate-900 shadow-soft outline-none ${fullscreen ? "min-h-[calc(100vh-132px)] w-full max-w-[1120px] px-8 py-9 md:px-16 md:py-14" : "min-h-[920px] w-full max-w-none px-8 py-9 md:px-16 md:py-14"}`}
         />
       </div>
     </section>
