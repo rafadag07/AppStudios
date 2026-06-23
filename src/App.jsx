@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import {
   AlignCenter,
@@ -976,10 +977,12 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   useEffect(() => {
     if (!editorRef.current) return;
     editorRef.current.innerHTML = value || emptyThemeDocument();
+    normalizeEditableBlocks(editorRef.current);
     refreshToc();
   }, []);
 
   const saveDocument = () => {
+    normalizeEditableBlocks(editorRef.current);
     refreshToc();
     onChange(editorRef.current?.innerHTML || "");
   };
@@ -1180,7 +1183,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
       }
       return;
     }
-    const block = event.target?.closest?.("[data-study-block]");
+    const block = event.target?.closest?.("[data-study-block], .study-block, .study-code-block");
     if (block && editorRef.current?.contains(block)) {
       selectedImage?.classList.remove("selected-editor-image");
       selectedBlock?.classList.remove("selected-study-block");
@@ -2516,6 +2519,17 @@ function updateDocumentToc(editor) {
   toc.innerHTML = `<h2>Índice</h2>${items || '<p class="toc-empty">Añade títulos y subtítulos para crear el índice.</p>'}`;
 }
 
+function normalizeEditableBlocks(editor) {
+  if (!editor) return;
+  editor.querySelectorAll(".study-block, .study-code-block").forEach((block) => {
+    block.dataset.studyBlock = "true";
+    if (!block.dataset.blockSize) block.dataset.blockSize = "normal";
+    if (!block.classList.contains("study-content-small") && !block.classList.contains("study-content-large")) {
+      block.classList.add("study-content-normal");
+    }
+  });
+}
+
 function getDocumentHeadings(editor) {
   return Array.from(editor.querySelectorAll("h1, h2, h3, h4"))
     .filter((heading) => !heading.closest(".auto-toc"))
@@ -2540,17 +2554,96 @@ function escapeHtml(value = "") {
 
 async function exportThemeToPdf(subject, theme, options = { includeToc: true, includeImages: true }) {
   try {
-    const ctx = createPdfContext();
-    const documentHtml = theme.documentHtml || buildThemeDocument(theme);
-
-    drawThemeDocumentHeader(ctx, subject, theme);
-    renderHtmlDocumentToPdf(ctx, documentHtml, options);
-
-    addPageNumbers(ctx.doc);
-    ctx.doc.save(`${safeFileName(subject.name)}-${safeFileName(theme.name)}.pdf`);
+    await exportThemeVisualPdf(subject, theme, options);
   } catch (error) {
     console.error(error);
-    window.alert("No se ha podido exportar el tema a PDF. Revisa si algun archivo adjunto esta danado.");
+    window.alert("No se ha podido exportar el tema a PDF. Revisa si algun bloque o imagen esta dando problemas.");
+  }
+}
+
+async function exportThemeVisualPdf(subject, theme, options = { includeToc: true, includeImages: true }) {
+  const liveDocument = document.querySelector(".study-document");
+  const sourceDocument = liveDocument?.cloneNode(true) || document.createElement("div");
+  if (!liveDocument) {
+    sourceDocument.className = "study-document";
+    sourceDocument.innerHTML = theme.documentHtml || buildThemeDocument(theme);
+  }
+
+  normalizeEditableBlocks(sourceDocument);
+  updateDocumentToc(sourceDocument);
+  sourceDocument.querySelectorAll(".selected-study-block, .selected-editor-image").forEach((node) => {
+    node.classList.remove("selected-study-block", "selected-editor-image");
+  });
+  sourceDocument.querySelectorAll(".study-code-actions").forEach((node) => node.remove());
+  sourceDocument.querySelectorAll("[contenteditable]").forEach((node) => node.removeAttribute("contenteditable"));
+  if (!options.includeToc) sourceDocument.querySelectorAll(".auto-toc").forEach((node) => node.remove());
+  if (!options.includeImages) sourceDocument.querySelectorAll("img").forEach((node) => node.remove());
+
+  const exportShell = document.createElement("div");
+  exportShell.style.position = "fixed";
+  exportShell.style.left = "-10000px";
+  exportShell.style.top = "0";
+  exportShell.style.width = "1120px";
+  exportShell.style.background = "#f3efe6";
+  exportShell.style.padding = "40px";
+  exportShell.style.zIndex = "-1";
+
+  const page = document.createElement("div");
+  page.className = "study-document pdf-export-document";
+  page.style.width = "1000px";
+  page.style.minHeight = "1300px";
+  page.style.margin = "0 auto";
+  page.style.background = "#ffffff";
+  page.style.borderRadius = "8px";
+  page.style.boxShadow = "0 18px 50px rgba(15,23,42,0.12)";
+  page.style.padding = "64px";
+  page.style.color = "#0f172a";
+
+  const header = document.createElement("div");
+  header.style.marginBottom = "28px";
+  header.style.borderBottom = "1px solid rgba(15,23,42,0.12)";
+  header.style.paddingBottom = "16px";
+  header.innerHTML = `
+    <p style="margin:0 0 8px;font-size:14px;font-weight:900;letter-spacing:.18em;text-transform:uppercase;color:${subject.color || "#2f6f73"}">${escapeHtml(subject.name)}</p>
+    <h1 style="margin:0;font-size:34px;line-height:1.12;font-weight:900;color:#172033">${escapeHtml(theme.name)}</h1>
+  `;
+
+  page.appendChild(header);
+  page.append(...Array.from(sourceDocument.childNodes));
+  exportShell.appendChild(page);
+  document.body.appendChild(exportShell);
+
+  try {
+    const canvas = await html2canvas(page, {
+      backgroundColor: "#ffffff",
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      windowWidth: 1120,
+    });
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 8;
+    const imageWidth = pageWidth - margin * 2;
+    const imageHeight = (canvas.height * imageWidth) / canvas.width;
+    const dataUrl = canvas.toDataURL("image/png", 1);
+    const contentHeight = pageHeight - margin * 2;
+    let remaining = imageHeight;
+    let y = margin;
+
+    pdf.addImage(dataUrl, "PNG", margin, y, imageWidth, imageHeight);
+    remaining -= contentHeight;
+    while (remaining > 0) {
+      pdf.addPage();
+      y = margin - (imageHeight - remaining);
+      pdf.addImage(dataUrl, "PNG", margin, y, imageWidth, imageHeight);
+      remaining -= contentHeight;
+    }
+    addPageNumbers(pdf);
+    pdf.save(`${safeFileName(subject.name)}-${safeFileName(theme.name)}.pdf`);
+  } finally {
+    exportShell.remove();
   }
 }
 
