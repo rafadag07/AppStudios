@@ -27,6 +27,7 @@ import {
   ListOrdered,
   LogOut,
   Mail,
+  Menu,
   Network,
   Paperclip,
   Pencil,
@@ -319,6 +320,7 @@ function App() {
 }
 
 function Shell({ children, view, setView, subjects, query, setQuery, openModal, cloudUser, syncStatus, onCloudSignIn, onCodeSignIn, onCloudSignOut }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const nav = [
     ["dashboard", "Campus", Sparkles],
     ["subjects", "Asignaturas", BookOpen],
@@ -333,58 +335,52 @@ function Shell({ children, view, setView, subjects, query, setQuery, openModal, 
   return (
     <div className="flex min-h-screen">
       <aside className="hidden w-72 shrink-0 border-r border-slate-900/10 bg-white/80 p-5 backdrop-blur xl:block">
-        <button onClick={() => setView({ page: "dashboard" })} className="mb-8 flex items-center gap-3 text-left">
-          <span className="grid h-12 w-12 place-items-center rounded-lg bg-[#172033] text-white">
-            <Sparkles size={22} />
-          </span>
-          <span>
-            <span className="block text-lg font-black">Campus Verano</span>
-            <span className="text-sm text-slate-500">Estudio personal</span>
-          </span>
-        </button>
-        <nav className="space-y-1">
-          {nav.map(([page, label, Icon]) => (
-            <button
-              key={page}
-              onClick={() => setView({ page })}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold transition ${
-                view.page === page ? "bg-[#dcebdc] text-[#1f5d55]" : "text-slate-600 hover:bg-slate-100"
-              }`}
-            >
-              <Icon size={18} />
-              {label}
-            </button>
-          ))}
-        </nav>
-        <div className="mt-4">
-          <CloudSyncButton
-            user={cloudUser}
-            status={syncStatus}
-            onSignIn={onCloudSignIn}
-            onCodeSignIn={onCodeSignIn}
-            onSignOut={onCloudSignOut}
-            full
-          />
-        </div>
-        <div className="mt-8">
-          <p className="mb-3 text-xs font-black uppercase tracking-[0.18em] text-slate-400">Asignaturas</p>
-          <div className="space-y-2">
-            {subjects.slice(0, 6).map((subject) => (
-              <button
-                key={subject.id}
-                onClick={() => setView({ page: "subject", subjectId: subject.id })}
-                className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-slate-100"
-              >
-                <ColorIcon subject={subject} />
-                <span className="min-w-0 flex-1 truncate text-sm font-bold">{subject.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <SidebarContent
+          nav={nav}
+          view={view}
+          setView={setView}
+          subjects={subjects}
+          cloudUser={cloudUser}
+          syncStatus={syncStatus}
+          onCloudSignIn={onCloudSignIn}
+          onCodeSignIn={onCodeSignIn}
+          onCloudSignOut={onCloudSignOut}
+        />
       </aside>
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 xl:hidden">
+          <button className="absolute inset-0 bg-slate-950/40" onClick={() => setMobileMenuOpen(false)} aria-label="Cerrar menu" />
+          <aside className="relative h-full w-[min(86vw,360px)] overflow-y-auto border-r border-slate-900/10 bg-white p-5 shadow-2xl">
+            <div className="mb-4 flex justify-end">
+              <IconButton icon={X} label="Cerrar menu" onClick={() => setMobileMenuOpen(false)} />
+            </div>
+            <SidebarContent
+              nav={nav}
+              view={view}
+              setView={(nextView) => {
+                setView(nextView);
+                setMobileMenuOpen(false);
+              }}
+              subjects={subjects}
+              cloudUser={cloudUser}
+              syncStatus={syncStatus}
+              onCloudSignIn={onCloudSignIn}
+              onCodeSignIn={onCodeSignIn}
+              onCloudSignOut={onCloudSignOut}
+            />
+          </aside>
+        </div>
+      )}
       <main className="min-w-0 flex-1">
         <header className="sticky top-0 z-20 border-b border-slate-900/10 bg-[#f7f4ee]/90 px-4 py-3 backdrop-blur md:px-8">
           <div className="mx-auto flex max-w-7xl items-center gap-3">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-white text-[#172033] shadow-sm xl:hidden"
+              aria-label="Abrir menu"
+            >
+              <Menu size={22} />
+            </button>
             <div className="relative min-w-0 flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input
@@ -414,6 +410,61 @@ function Shell({ children, view, setView, subjects, query, setQuery, openModal, 
         />
       </div>
     </div>
+  );
+}
+
+function SidebarContent({ nav, view, setView, subjects, cloudUser, syncStatus, onCloudSignIn, onCodeSignIn, onCloudSignOut }) {
+  return (
+    <>
+      <button onClick={() => setView({ page: "dashboard" })} className="mb-8 flex items-center gap-3 text-left">
+        <span className="grid h-12 w-12 place-items-center rounded-lg bg-[#172033] text-white">
+          <Sparkles size={22} />
+        </span>
+        <span>
+          <span className="block text-lg font-black">Campus Verano</span>
+          <span className="text-sm text-slate-500">Estudio personal</span>
+        </span>
+      </button>
+      <nav className="space-y-1">
+        {nav.map(([page, label, Icon]) => (
+          <button
+            key={page}
+            onClick={() => setView({ page })}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold transition ${
+              view.page === page ? "bg-[#dcebdc] text-[#1f5d55]" : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            <Icon size={18} />
+            {label}
+          </button>
+        ))}
+      </nav>
+      <div className="mt-4">
+        <CloudSyncButton
+          user={cloudUser}
+          status={syncStatus}
+          onSignIn={onCloudSignIn}
+          onCodeSignIn={onCodeSignIn}
+          onSignOut={onCloudSignOut}
+          full
+        />
+      </div>
+      <div className="mt-8">
+        <p className="mb-3 text-xs font-black uppercase tracking-[0.18em] text-slate-400">Asignaturas</p>
+        <div className="space-y-2">
+          {subjects.slice(0, 6).map((subject) => (
+            <button
+              key={subject.id}
+              onClick={() => setView({ page: "subject", subjectId: subject.id })}
+              className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-slate-100"
+            >
+              <ColorIcon subject={subject} />
+              <span className="min-w-0 flex-1 truncate text-sm font-bold">{subject.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 
