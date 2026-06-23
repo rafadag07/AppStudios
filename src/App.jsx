@@ -27,7 +27,9 @@ import {
   ListOrdered,
   LogOut,
   Mail,
+  Maximize2,
   Menu,
+  Minimize2,
   Network,
   Paperclip,
   Pencil,
@@ -40,6 +42,7 @@ import {
   Trash2,
   Underline,
   Upload,
+  Wand2,
   X,
 } from "lucide-react";
 import { STORAGE_KEY, createId, initialData } from "./data/schema";
@@ -305,7 +308,7 @@ function App() {
           <SubjectQAPage subject={currentSubject} openModal={setModal} updateData={updateData} setView={setView} />
         )}
         {view.page === "theme" && currentSubject && currentTheme && (
-          <ThemePage subject={currentSubject} theme={currentTheme} openModal={setModal} updateData={updateData} setView={setView} />
+          <ThemePage subject={currentSubject} theme={currentTheme} openModal={setModal} updateData={updateData} setView={setView} syncStatus={syncStatus} />
         )}
         {view.page === "calendar" && <CalendarPage data={data} openModal={setModal} updateData={updateData} />}
         {view.page === "schedule" && <SchedulePage data={data} openModal={setModal} updateData={updateData} />}
@@ -775,8 +778,12 @@ function SubjectPage({ subject, setView, openModal, updateData }) {
   );
 }
 
-function ThemePage({ subject, theme, openModal, updateData, setView }) {
+function ThemePage({ subject, theme, openModal, updateData, setView, syncStatus }) {
   const fileInputRef = useRef(null);
+  const [savedAt, setSavedAt] = useState(null);
+  const [previewFile, setPreviewFile] = useState(null);
+  const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
+  const [exportOptions, setExportOptions] = useState({ includeToc: true, includeImages: true });
   const documentHtml = theme.documentHtml || buildThemeDocument(theme);
 
   const addFile = async (event) => {
@@ -795,6 +802,25 @@ function ThemePage({ subject, theme, openModal, updateData, setView }) {
     updateData((draft) => {
       const target = findTheme(draft, subject.id, theme.id);
       target.documentHtml = html;
+      return draft;
+    });
+    setSavedAt(new Date());
+  };
+
+  const createQuestionFromSelection = (text) => {
+    const clean = text.trim();
+    if (!clean) return;
+    updateData((draft) => {
+      const target = draft.subjects.find((item) => item.id === subject.id);
+      if (!target.qa) target.qa = [];
+      target.qa.push({
+        id: createId("qa"),
+        question: `Explica: ${clean}`,
+        answer: "",
+        status: "pendiente",
+        sourceThemeId: theme.id,
+        sourceThemeName: theme.name,
+      });
       return draft;
     });
   };
@@ -820,7 +846,7 @@ function ThemePage({ subject, theme, openModal, updateData, setView }) {
             <p className="mt-2 max-w-3xl text-slate-600">{theme.description}</p>
           </div>
           <div className="flex flex-wrap items-start gap-2">
-            <button onClick={() => exportThemeToPdf(subject, theme)} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#172033] px-4 text-sm font-black text-white shadow-sm hover:bg-[#22304a]">
+            <button onClick={() => setExportOptionsOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#172033] px-4 text-sm font-black text-white shadow-sm hover:bg-[#22304a]">
               <FileText size={18} /> Exportar tema a PDF
             </button>
             <Badge>{theme.status}</Badge>
@@ -831,7 +857,7 @@ function ThemePage({ subject, theme, openModal, updateData, setView }) {
       </section>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <RichTextEditor key={theme.id} value={documentHtml} onChange={updateDocument} />
+        <RichTextEditor key={theme.id} value={documentHtml} onChange={updateDocument} onCreateQuestion={createQuestionFromSelection} />
         <aside className="space-y-4">
           <ThemeSection title="PDFs e imágenes" icon={Paperclip} onAdd={() => fileInputRef.current?.click()}>
             <input ref={fileInputRef} type="file" accept="image/*,.pdf" className="hidden" onChange={addFile} />
@@ -842,22 +868,54 @@ function ThemePage({ subject, theme, openModal, updateData, setView }) {
             ) : (
               <div className="grid gap-2">
                 {theme.media.map((file) => (
-                  <StoredFileLink key={file.id} file={file} onDelete={() => deleteFile(file.id)} />
+                  <StoredFileLink key={file.id} file={file} onPreview={() => setPreviewFile(file)} onDelete={() => deleteFile(file.id)} />
                 ))}
               </div>
             )}
           </ThemeSection>
           <section className="rounded-lg border border-slate-900/10 bg-white p-4">
             <h2 className="flex items-center gap-2 font-black"><Save size={18} /> Guardado</h2>
+            <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-500">{syncStatus}</p>
             <p className="mt-2 text-sm text-slate-600">El documento se guarda automáticamente en este navegador mientras escribes.</p>
           </section>
         </aside>
       </div>
+      {previewFile && <FilePreviewModal file={previewFile} close={() => setPreviewFile(null)} />}
+      {exportOptionsOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4">
+          <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-soft">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-black">Exportar PDF</h2>
+                <p className="text-sm text-slate-500">Elige que entra en tus apuntes.</p>
+              </div>
+              <IconButton icon={X} label="Cerrar" onClick={() => setExportOptionsOpen(false)} />
+            </div>
+            <label className="mt-4 flex items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm font-bold">
+              <input type="checkbox" checked={exportOptions.includeToc} onChange={(event) => setExportOptions((current) => ({ ...current, includeToc: event.target.checked }))} />
+              Incluir indice
+            </label>
+            <label className="mt-2 flex items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm font-bold">
+              <input type="checkbox" checked={exportOptions.includeImages} onChange={(event) => setExportOptions((current) => ({ ...current, includeImages: event.target.checked }))} />
+              Incluir imagenes
+            </label>
+            <button
+              onClick={() => {
+                setExportOptionsOpen(false);
+                exportThemeToPdf(subject, theme, exportOptions);
+              }}
+              className="mt-4 h-11 w-full rounded-lg bg-[#172033] text-sm font-black text-white"
+            >
+              Exportar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function RichTextEditor({ value, onChange }) {
+function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const editorRef = useRef(null);
   const editorFrameRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -865,6 +923,8 @@ function RichTextEditor({ value, onChange }) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [imageWidth, setImageWidth] = useState(70);
   const [imageTools, setImageTools] = useState(null);
+  const [headings, setHeadings] = useState([]);
+  const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
     if (!editorRef.current) return;
@@ -880,6 +940,7 @@ function RichTextEditor({ value, onChange }) {
   const refreshToc = () => {
     if (!editorRef.current) return;
     updateDocumentToc(editorRef.current);
+    setHeadings(getDocumentHeadings(editorRef.current));
   };
 
   const selectionIsInsideEditor = () => {
@@ -908,6 +969,31 @@ function RichTextEditor({ value, onChange }) {
     document.execCommand(command, false, commandValue);
     saveSelection();
     saveDocument();
+  };
+
+  const insertHtml = (html) => {
+    restoreSelection();
+    document.execCommand("insertHTML", false, html);
+    saveSelection();
+    saveDocument();
+  };
+
+  const insertTemplate = (type) => {
+    const templates = {
+      definicion: '<h2>Definicion</h2><blockquote><strong>Concepto:</strong> escribe la definicion aqui.</blockquote><p><strong>Idea clave:</strong> </p>',
+      teorema: '<h2>Teorema</h2><p><strong>Enunciado:</strong> </p><p><strong>Condiciones:</strong> </p><p><strong>Demostracion:</strong> </p>',
+      ejemplo: '<h2>Ejemplo</h2><p><strong>Planteamiento:</strong> </p><p><strong>Solucion:</strong> </p>',
+      ejercicio: '<h2>Ejercicio resuelto</h2><p><strong>Problema:</strong> </p><p><strong>Resolucion:</strong> </p><p><strong>Resultado:</strong> </p>',
+      error: '<h2>Error tipico</h2><p><strong>Error:</strong> </p><p><strong>Como evitarlo:</strong> </p>',
+      duda: '<h2>Duda</h2><p><strong>Pregunta:</strong> </p><p><strong>Respuesta cuando la tenga:</strong> </p>',
+      resumen: '<h2>Resumen final</h2><ul><li>Idea principal</li><li>Formula o regla clave</li><li>Ejercicio tipo</li></ul>',
+    };
+    insertHtml(templates[type]);
+  };
+
+  const createQuestionFromSelection = () => {
+    const text = window.getSelection()?.toString() || "";
+    if (text.trim()) onCreateQuestion?.(text);
   };
 
   const addInlineImage = (event) => {
@@ -1013,6 +1099,23 @@ function RichTextEditor({ value, onChange }) {
     saveDocument();
   };
 
+  const deleteSelectedImage = () => {
+    if (!selectedImage) return;
+    selectedImage.remove();
+    setSelectedImage(null);
+    setImageTools(null);
+    saveDocument();
+  };
+
+  const addImageCaption = () => {
+    if (!selectedImage) return;
+    const caption = document.createElement("p");
+    caption.className = "image-caption";
+    caption.textContent = "Pie de imagen";
+    selectedImage.insertAdjacentElement("afterend", caption);
+    saveDocument();
+  };
+
   const updateImageToolsPosition = (image) => {
     if (!image || !editorFrameRef.current) return;
     const imageRect = image.getBoundingClientRect();
@@ -1025,8 +1128,8 @@ function RichTextEditor({ value, onChange }) {
   };
 
   return (
-    <section className="overflow-hidden rounded-lg border border-slate-900/10 bg-white shadow-soft">
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-900/10 bg-slate-50 px-3 py-3">
+    <section className={`${fullscreen ? "fixed inset-0 z-50 overflow-auto rounded-none" : "overflow-hidden rounded-lg"} border border-slate-900/10 bg-white shadow-soft`}>
+      <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b border-slate-900/10 bg-slate-50/95 px-3 py-3 backdrop-blur">
         <EditorTool icon={Heading1} label="Título" onClick={() => runCommand("formatBlock", "h1")} />
         <EditorTool icon={Heading2} label="Subtítulo 1" onClick={() => runCommand("formatBlock", "h2")} />
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("formatBlock", "h3")} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">S2</button>
@@ -1038,6 +1141,21 @@ function RichTextEditor({ value, onChange }) {
         <EditorTool icon={ListOrdered} label="Lista numerada" onClick={() => runCommand("insertOrderedList")} />
         <EditorTool icon={Quote} label="Cita" onClick={() => runCommand("formatBlock", "blockquote")} />
         <EditorTool icon={Image} label="Imagen dentro del apunte" onClick={() => fileInputRef.current?.click()} />
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertTemplate("definicion")} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">
+          <Wand2 size={16} className="inline" /> Def
+        </button>
+        <select onMouseDown={saveSelection} onChange={(event) => { if (event.target.value) insertTemplate(event.target.value); event.target.value = ""; }} className="h-9 rounded-lg bg-white px-2 text-sm font-black text-slate-700 shadow-sm">
+          <option value="">Plantillas</option>
+          <option value="teorema">Teorema</option>
+          <option value="ejemplo">Ejemplo</option>
+          <option value="ejercicio">Ejercicio resuelto</option>
+          <option value="error">Error tipico</option>
+          <option value="duda">Duda</option>
+          <option value="resumen">Resumen final</option>
+        </select>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={createQuestionFromSelection} className="h-9 rounded-lg bg-[#dcebdc] px-3 text-sm font-black text-[#1f5d55] shadow-sm hover:bg-[#cde2cd]">
+          Crear pregunta
+        </button>
         <button
           type="button"
           onClick={() => runCommand("removeFormat")}
@@ -1045,9 +1163,30 @@ function RichTextEditor({ value, onChange }) {
         >
           Limpiar
         </button>
+        <EditorTool icon={fullscreen ? Minimize2 : Maximize2} label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} onClick={() => setFullscreen((value) => !value)} />
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={addInlineImage} />
       </div>
-      <div ref={editorFrameRef} className="relative bg-[#f3efe6] px-3 py-5 md:px-8">
+      <div ref={editorFrameRef} className="relative grid gap-4 bg-[#f3efe6] px-3 py-5 md:px-8 xl:grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="hidden xl:block">
+          <div className="sticky top-20 rounded-lg border border-slate-900/10 bg-white p-3 shadow-sm">
+            <h3 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-slate-400">Indice</h3>
+            {headings.length === 0 ? (
+              <p className="text-xs font-bold text-slate-400">Sin titulos.</p>
+            ) : (
+              <div className="space-y-1">
+                {headings.map((heading) => (
+                  <button
+                    key={heading.id}
+                    onClick={() => editorRef.current?.querySelector(`#${heading.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    className={`block w-full truncate rounded px-2 py-1 text-left text-xs font-black hover:bg-slate-100 ${heading.level > 2 ? "pl-5 text-slate-500" : "text-[#1f5d55]"}`}
+                  >
+                    {heading.text}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
         {selectedImage && imageTools && (
           <div
             className="absolute z-10 flex flex-wrap items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 p-2 shadow-soft backdrop-blur"
@@ -1066,6 +1205,8 @@ function RichTextEditor({ value, onChange }) {
             <EditorTool icon={AlignLeft} label="Izquierda" onClick={() => alignSelectedImage("left")} />
             <EditorTool icon={AlignCenter} label="Centro" onClick={() => alignSelectedImage("center")} />
             <EditorTool icon={AlignRight} label="Derecha" onClick={() => alignSelectedImage("right")} />
+            <button type="button" onClick={addImageCaption} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black">Pie</button>
+            <EditorTool icon={Trash2} label="Borrar imagen" onClick={deleteSelectedImage} />
           </div>
         )}
         <div
@@ -1880,7 +2021,7 @@ function LinkList({ items }) {
   return <div className="space-y-2">{items.map((item) => <a key={item.id} href={item.url || "#"} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 text-sm font-bold"><LinkIcon size={16} /> {item.title}</a>)}</div>;
 }
 
-function StoredFileLink({ file, onDelete }) {
+function StoredFileLink({ file, onPreview, onDelete }) {
   const [href, setHref] = useState(file.dataUrl || "");
 
   useEffect(() => {
@@ -1907,8 +2048,48 @@ function StoredFileLink({ file, onDelete }) {
         <p className="truncate text-sm font-black">{file.name}</p>
         <p className="mt-1 text-xs font-bold uppercase text-slate-400">{file.type === "pdf" ? "PDF" : "Imagen"}</p>
         <div className="mt-2 flex gap-2">
+          <button type="button" onClick={onPreview} className="rounded bg-slate-100 px-2 py-1 text-xs font-black text-slate-700">Vista</button>
           <a href={href || "#"} target="_blank" rel="noreferrer" className="rounded bg-slate-100 px-2 py-1 text-xs font-black text-slate-700">Abrir</a>
           <button type="button" onClick={onDelete} className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-700">Borrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FilePreviewModal({ file, close }) {
+  const [href, setHref] = useState(file.dataUrl || "");
+  useEffect(() => {
+    let objectUrl = "";
+    if (!file.fileId) return undefined;
+    getStoredFile(file.fileId).then((stored) => {
+      if (!stored?.blob) return;
+      objectUrl = URL.createObjectURL(stored.blob);
+      setHref(objectUrl);
+    });
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [file.fileId]);
+  const isPdf = file.type === "pdf" || file.mime?.includes("pdf");
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-lg bg-white shadow-soft">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-900/10 p-4">
+          <div>
+            <h2 className="font-black">{file.name}</h2>
+            <p className="text-xs font-bold uppercase text-slate-400">{isPdf ? "PDF" : "Imagen"}</p>
+          </div>
+          <IconButton icon={X} label="Cerrar" onClick={close} />
+        </div>
+        <div className="max-h-[75vh] overflow-auto bg-slate-50 p-4">
+          {isPdf ? (
+            <iframe title={file.name} src={href} className="h-[70vh] w-full rounded-lg bg-white" />
+          ) : href ? (
+            <img src={href} alt={file.name} className="mx-auto max-h-[70vh] rounded-lg object-contain shadow-soft" />
+          ) : (
+            <p className="p-8 text-center font-bold text-slate-500">Cargando archivo...</p>
+          )}
         </div>
       </div>
     </div>
@@ -2123,6 +2304,19 @@ function updateDocumentToc(editor) {
   toc.innerHTML = `<h2>Índice</h2>${items || '<p class="toc-empty">Añade títulos y subtítulos para crear el índice.</p>'}`;
 }
 
+function getDocumentHeadings(editor) {
+  return Array.from(editor.querySelectorAll("h1, h2, h3, h4"))
+    .filter((heading) => !heading.closest(".auto-toc"))
+    .map((heading, index) => {
+      if (!heading.id) heading.id = `titulo-${index + 1}-${Date.now().toString(36)}`;
+      return {
+        id: heading.id,
+        text: heading.textContent.trim() || "Sin titulo",
+        level: Number(heading.tagName.slice(1)),
+      };
+    });
+}
+
 function escapeHtml(value = "") {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -2132,13 +2326,13 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#039;");
 }
 
-async function exportThemeToPdf(subject, theme) {
+async function exportThemeToPdf(subject, theme, options = { includeToc: true, includeImages: true }) {
   try {
     const ctx = createPdfContext();
     const documentHtml = theme.documentHtml || buildThemeDocument(theme);
 
     drawThemeDocumentHeader(ctx, subject, theme);
-    renderHtmlDocumentToPdf(ctx, documentHtml);
+    renderHtmlDocumentToPdf(ctx, documentHtml, options);
 
     addPageNumbers(ctx.doc);
     ctx.doc.save(`${safeFileName(subject.name)}-${safeFileName(theme.name)}.pdf`);
@@ -2166,18 +2360,19 @@ function drawThemeDocumentHeader(ctx, subject, theme) {
   ctx.y += 12;
 }
 
-function renderHtmlDocumentToPdf(ctx, html = "") {
+function renderHtmlDocumentToPdf(ctx, html = "", options = { includeToc: true, includeImages: true }) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
+  if (!options.includeToc) doc.querySelectorAll(".auto-toc").forEach((node) => node.remove());
   const nodes = Array.from(doc.body.childNodes);
   if (!nodes.length) {
     addPdfParagraph(ctx, "No hay apuntes escritos todavia.");
     return;
   }
-  nodes.forEach((node) => renderPdfNode(ctx, node));
+  nodes.forEach((node) => renderPdfNode(ctx, node, options));
 }
 
-function renderPdfNode(ctx, node) {
+function renderPdfNode(ctx, node, options = { includeImages: true }) {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent?.trim();
     if (text) addPdfParagraph(ctx, text);
@@ -2187,6 +2382,7 @@ function renderPdfNode(ctx, node) {
 
   const tag = node.tagName.toLowerCase();
   if (tag === "img") {
+    if (!options.includeImages) return;
     const src = node.getAttribute("src");
     if (src?.startsWith("data:image")) addPdfImage(ctx, src);
     return;
@@ -2219,7 +2415,7 @@ function renderPdfNode(ctx, node) {
     return;
   }
 
-  Array.from(node.childNodes).forEach((child) => renderPdfNode(ctx, child));
+  Array.from(node.childNodes).forEach((child) => renderPdfNode(ctx, child, options));
   if (tag === "div" || tag === "ul" || tag === "ol") ctx.y += 2;
 }
 
