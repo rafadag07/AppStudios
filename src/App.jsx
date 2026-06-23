@@ -859,6 +859,7 @@ function ThemePage({ subject, theme, openModal, updateData, setView, syncStatus 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <RichTextEditor key={theme.id} value={documentHtml} onChange={updateDocument} onCreateQuestion={createQuestionFromSelection} />
         <aside className="space-y-4">
+          <ThemeDocumentIndex html={documentHtml} />
           <ThemeSection title="PDFs e imágenes" icon={Paperclip} onAdd={() => fileInputRef.current?.click()}>
             <input ref={fileInputRef} type="file" accept="image/*,.pdf" className="hidden" onChange={addFile} />
             {theme.media.length === 0 ? (
@@ -915,6 +916,51 @@ function ThemePage({ subject, theme, openModal, updateData, setView, syncStatus 
   );
 }
 
+function ThemeDocumentIndex({ html }) {
+  const headings = useMemo(() => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html || "", "text/html");
+    return Array.from(doc.querySelectorAll("h1, h2, h3, h4"))
+      .filter((heading) => !heading.closest(".auto-toc"))
+      .map((heading, index) => ({
+        id: heading.id || `theme-index-${index}`,
+        level: Number(heading.tagName.replace("H", "")),
+        text: heading.textContent.trim(),
+      }))
+      .filter((heading) => heading.text);
+  }, [html]);
+
+  const jumpToHeading = (target) => {
+    const editor = document.querySelector(".study-document");
+    const heading = Array.from(editor?.querySelectorAll("h1, h2, h3, h4") || []).find(
+      (item) => !item.closest(".auto-toc") && item.textContent.trim() === target.text,
+    );
+    heading?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  return (
+    <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
+      <h2 className="flex items-center gap-2 font-black"><BookOpen size={18} /> Indice</h2>
+      {headings.length === 0 ? (
+        <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-400">Sin titulos todavia.</p>
+      ) : (
+        <div className="mt-3 max-h-[360px] space-y-1 overflow-auto pr-1">
+          {headings.map((heading) => (
+            <button
+              key={`${heading.id}-${heading.text}`}
+              type="button"
+              onClick={() => jumpToHeading(heading)}
+              className={`block w-full truncate rounded-lg px-3 py-2 text-left text-sm font-black hover:bg-slate-50 ${heading.level > 2 ? "pl-6 text-slate-500" : "text-[#1f5d55]"}`}
+            >
+              {heading.text}
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const editorRef = useRef(null);
   const editorFrameRef = useRef(null);
@@ -923,7 +969,6 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [imageWidth, setImageWidth] = useState(70);
   const [imageTools, setImageTools] = useState(null);
-  const [headings, setHeadings] = useState([]);
   const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
@@ -940,7 +985,6 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const refreshToc = () => {
     if (!editorRef.current) return;
     updateDocumentToc(editorRef.current);
-    setHeadings(getDocumentHeadings(editorRef.current));
   };
 
   const selectionIsInsideEditor = () => {
@@ -1154,27 +1198,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
         <EditorTool icon={fullscreen ? Minimize2 : Maximize2} label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} onClick={() => setFullscreen((value) => !value)} />
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={addInlineImage} />
       </div>
-      <div ref={editorFrameRef} className={`relative grid gap-5 bg-[#f3efe6] px-3 pb-5 pt-24 md:px-8 ${fullscreen ? "min-h-screen xl:grid-cols-[260px_minmax(0,1fr)] xl:pt-28" : "xl:grid-cols-[260px_minmax(0,1fr)]"}`}>
-        <aside className="hidden xl:block">
-          <div className="sticky top-[150px] max-h-[calc(100vh-170px)] overflow-auto rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
-            <h3 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-slate-400">Indice</h3>
-            {headings.length === 0 ? (
-              <p className="text-xs font-bold text-slate-400">Sin titulos.</p>
-            ) : (
-              <div className="space-y-1">
-                {headings.map((heading) => (
-                  <button
-                    key={heading.id}
-                    onClick={() => editorRef.current?.querySelector(`#${heading.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                    className={`block w-full truncate rounded px-2 py-1 text-left text-xs font-black hover:bg-slate-100 ${heading.level > 2 ? "pl-5 text-slate-500" : "text-[#1f5d55]"}`}
-                  >
-                    {heading.text}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </aside>
+      <div ref={editorFrameRef} className={`relative bg-[#f3efe6] px-3 pb-5 pt-24 md:px-8 ${fullscreen ? "min-h-screen xl:pt-28" : ""}`}>
         {selectedImage && imageTools && (
           <div
             className="absolute z-10 flex flex-wrap items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 p-2 shadow-soft backdrop-blur"
