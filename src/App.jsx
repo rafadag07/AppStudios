@@ -1141,18 +1141,6 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
         <EditorTool icon={ListOrdered} label="Lista numerada" onClick={() => runCommand("insertOrderedList")} />
         <EditorTool icon={Quote} label="Cita" onClick={() => runCommand("formatBlock", "blockquote")} />
         <EditorTool icon={Image} label="Imagen dentro del apunte" onClick={() => fileInputRef.current?.click()} />
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertTemplate("definicion")} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">
-          <Wand2 size={16} className="inline" /> Def
-        </button>
-        <select onMouseDown={saveSelection} onChange={(event) => { if (event.target.value) insertTemplate(event.target.value); event.target.value = ""; }} className="h-9 rounded-lg bg-white px-2 text-sm font-black text-slate-700 shadow-sm">
-          <option value="">Plantillas</option>
-          <option value="teorema">Teorema</option>
-          <option value="ejemplo">Ejemplo</option>
-          <option value="ejercicio">Ejercicio resuelto</option>
-          <option value="error">Error tipico</option>
-          <option value="duda">Duda</option>
-          <option value="resumen">Resumen final</option>
-        </select>
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={createQuestionFromSelection} className="h-9 rounded-lg bg-[#dcebdc] px-3 text-sm font-black text-[#1f5d55] shadow-sm hover:bg-[#cde2cd]">
           Crear pregunta
         </button>
@@ -1166,7 +1154,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
         <EditorTool icon={fullscreen ? Minimize2 : Maximize2} label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} onClick={() => setFullscreen((value) => !value)} />
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={addInlineImage} />
       </div>
-      <div ref={editorFrameRef} className="relative grid gap-4 bg-[#f3efe6] px-3 py-5 md:px-8 xl:grid-cols-[220px_minmax(0,1fr)]">
+      <div ref={editorFrameRef} className={`relative grid gap-4 bg-[#f3efe6] px-3 py-5 md:px-8 ${fullscreen ? "xl:grid-cols-[240px_minmax(0,1fr)]" : "xl:grid-cols-[220px_minmax(0,1fr)]"}`}>
         <aside className="hidden xl:block">
           <div className="sticky top-20 rounded-lg border border-slate-900/10 bg-white p-3 shadow-sm">
             <h3 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-slate-400">Indice</h3>
@@ -1222,7 +1210,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
           onKeyUp={saveSelection}
           onMouseUp={saveSelection}
           onScroll={() => selectedImage && updateImageToolsPosition(selectedImage)}
-          className="study-document mx-auto min-h-[760px] max-w-4xl rounded bg-white px-8 py-9 text-slate-900 shadow-soft outline-none md:px-14 md:py-12"
+          className={`study-document mx-auto rounded bg-white text-slate-900 shadow-soft outline-none ${fullscreen ? "study-document-full min-h-[calc(100vh-118px)] w-full max-w-7xl px-10 py-10 md:px-20 md:py-16" : "min-h-[920px] w-full max-w-5xl px-8 py-9 md:px-16 md:py-14"}`}
         />
       </div>
     </section>

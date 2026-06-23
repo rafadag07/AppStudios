@@ -53,8 +53,13 @@ select {
 
 .study-document {
   line-height: 1.75;
-  font-size: 1.03rem;
+  font-size: 1.1rem;
   overflow-wrap: anywhere;
+}
+
+.study-document-full {
+  font-size: 1.25rem;
+  line-height: 1.85;
 }
 
 .study-document:empty::before {
@@ -64,22 +69,34 @@ select {
 
 .study-document h1 {
   margin: 0 0 1rem;
-  font-size: 2.25rem;
+  font-size: 2.5rem;
   line-height: 1.1;
   font-weight: 900;
 }
 
+.study-document-full h1 {
+  font-size: 3.1rem;
+}
+
 .study-document h2 {
   margin: 2rem 0 0.75rem;
-  font-size: 1.45rem;
+  font-size: 1.7rem;
   line-height: 1.25;
   font-weight: 900;
 }
 
+.study-document-full h2 {
+  font-size: 2.05rem;
+}
+
 .study-document h3 {
   margin: 1.35rem 0 0.4rem;
-  font-size: 1.15rem;
+  font-size: 1.3rem;
   font-weight: 900;
+}
+
+.study-document-full h3 {
+  font-size: 1.55rem;
 }
 
 .study-document h4 {
