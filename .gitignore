@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.vercel/
 .env
 .env.local
 .env.*.local
@@ -8,3 +9,5 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .DS_Store
+
+.vercel
