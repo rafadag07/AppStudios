@@ -967,9 +967,12 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const editorFrameRef = useRef(null);
   const fileInputRef = useRef(null);
   const savedRangeRef = useRef(null);
+  const draggingImageRef = useRef(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [imageWidth, setImageWidth] = useState(70);
   const [imageTools, setImageTools] = useState(null);
+  const [draggingImage, setDraggingImage] = useState(null);
+  const [imageDropIndicator, setImageDropIndicator] = useState(null);
   const [selectedBlock, setSelectedBlock] = useState(null);
   const [blockTools, setBlockTools] = useState(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -978,11 +981,13 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     if (!editorRef.current) return;
     editorRef.current.innerHTML = value || emptyThemeDocument();
     normalizeEditableBlocks(editorRef.current);
+    prepareEditorImages();
     refreshToc();
   }, []);
 
   const saveDocument = () => {
     normalizeEditableBlocks(editorRef.current);
+    prepareEditorImages();
     refreshToc();
     onChange(editorRef.current?.innerHTML || "");
   };
@@ -1044,14 +1049,16 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     const anchor = selection.anchorNode?.nodeType === Node.TEXT_NODE ? selection.anchorNode.parentElement : selection.anchorNode;
     const currentSize = Number.parseFloat(window.getComputedStyle(anchor || editorRef.current).fontSize) || 18;
     const nextSize = Math.min(44, Math.max(11, currentSize + delta));
-    document.execCommand("fontSize", false, "7");
-    editorRef.current.querySelectorAll('font[size="7"]').forEach((font) => {
-      const span = document.createElement("span");
-      span.style.fontSize = `${nextSize}px`;
-      span.innerHTML = font.innerHTML;
-      font.replaceWith(span);
-    });
-    saveSelection();
+    const range = selection.getRangeAt(0);
+    const span = document.createElement("span");
+    span.style.fontSize = `${nextSize}px`;
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+    const newRange = document.createRange();
+    newRange.selectNodeContents(span);
+    selection.removeAllRanges();
+    selection.addRange(newRange);
+    savedRangeRef.current = newRange.cloneRange();
     saveDocument();
   };
 
@@ -1172,6 +1179,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     image.style.display = "block";
     image.style.margin = "1rem auto";
     image.dataset.editableImage = "true";
+    image.draggable = true;
 
     const nextLine = document.createElement("p");
     nextLine.innerHTML = "<br>";
@@ -1279,23 +1287,27 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
 
   const alignSelectedImage = (align) => {
     if (!selectedImage) return;
-    selectedImage.style.float = "";
-    selectedImage.style.display = "block";
-    selectedImage.style.margin = "1rem auto";
-    if (align === "left") {
-      selectedImage.style.float = "left";
-      selectedImage.style.margin = "0.5rem 1.25rem 0.75rem 0";
-    }
-    if (align === "right") {
-      selectedImage.style.float = "right";
-      selectedImage.style.margin = "0.5rem 0 0.75rem 1.25rem";
-    }
-    if (align === "center") {
-      selectedImage.style.float = "";
-      selectedImage.style.margin = "1rem auto";
-    }
+    applyImageAlignment(selectedImage, align);
     window.requestAnimationFrame(() => updateImageToolsPosition(selectedImage));
     saveDocument();
+  };
+
+  const applyImageAlignment = (image, align) => {
+    image.style.float = "";
+    image.style.display = "block";
+    image.style.margin = "1rem auto";
+    if (align === "left") {
+      image.style.float = "left";
+      image.style.margin = "0.5rem 1.25rem 0.75rem 0";
+    }
+    if (align === "right") {
+      image.style.float = "right";
+      image.style.margin = "0.5rem 0 0.75rem 1.25rem";
+    }
+    if (align === "center") {
+      image.style.float = "";
+      image.style.margin = "1rem auto";
+    }
   };
 
   const deleteSelectedImage = () => {
@@ -1352,6 +1364,82 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
       top: Math.max(12, blockRect.top - frameRect.top - 54),
       width: blockRect.width,
     });
+  };
+
+  const prepareEditorImages = () => {
+    editorRef.current?.querySelectorAll("img").forEach((image) => {
+      image.draggable = true;
+      image.setAttribute("draggable", "true");
+      image.dataset.editableImage = "true";
+    });
+  };
+
+  const getImageDropPlacement = (event) => {
+    if (!editorRef.current || !editorFrameRef.current) return null;
+    const editorRect = editorRef.current.getBoundingClientRect();
+    const align = event.clientX < editorRect.left + editorRect.width * 0.33 ? "left" : event.clientX > editorRect.left + editorRect.width * 0.67 ? "right" : "center";
+    const activeImage = draggingImageRef.current || draggingImage;
+    const candidates = Array.from(editorRef.current.children).filter((node) => node !== activeImage && node.nodeType === Node.ELEMENT_NODE);
+    const target = candidates.find((node) => {
+      const rect = node.getBoundingClientRect();
+      return event.clientY >= rect.top && event.clientY <= rect.bottom;
+    }) || candidates[candidates.length - 1] || editorRef.current;
+    const rect = target.getBoundingClientRect();
+    const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    const frameRect = editorFrameRef.current.getBoundingClientRect();
+    return {
+      target,
+      position,
+      align,
+      top: (position === "before" ? rect.top : rect.bottom) - frameRect.top,
+      left: Math.max(12, editorRect.left - frameRect.left),
+      width: editorRect.width,
+    };
+  };
+
+  const handleImageDragStart = (event) => {
+    if (event.target?.tagName !== "IMG") return;
+    draggingImageRef.current = event.target;
+    setDraggingImage(event.target);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", "move-image");
+    event.target.classList.add("dragging-editor-image");
+  };
+
+  const handleImageDragOver = (event) => {
+    if (!draggingImageRef.current && !draggingImage) return;
+    event.preventDefault();
+    const placement = getImageDropPlacement(event);
+    if (placement) setImageDropIndicator(placement);
+  };
+
+  const handleImageDrop = (event) => {
+    const activeImage = draggingImageRef.current || draggingImage;
+    if (!activeImage) return;
+    event.preventDefault();
+    const placement = getImageDropPlacement(event);
+    activeImage.classList.remove("dragging-editor-image");
+    if (placement?.target && placement.target !== editorRef.current) {
+      if (placement.position === "before") placement.target.before(activeImage);
+      else placement.target.after(activeImage);
+    } else {
+      editorRef.current?.appendChild(activeImage);
+    }
+    applyImageAlignment(activeImage, placement?.align || "center");
+    setSelectedImage(activeImage);
+    draggingImageRef.current = null;
+    setDraggingImage(null);
+    setImageDropIndicator(null);
+    window.requestAnimationFrame(() => updateImageToolsPosition(activeImage));
+    saveDocument();
+  };
+
+  const handleImageDragEnd = () => {
+    const activeImage = draggingImageRef.current || draggingImage;
+    activeImage?.classList.remove("dragging-editor-image");
+    draggingImageRef.current = null;
+    setDraggingImage(null);
+    setImageDropIndicator(null);
   };
 
   return (
@@ -1424,6 +1512,18 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={addInlineImage} />
       </div>
       <div ref={editorFrameRef} className={`relative bg-[#f3efe6] px-3 pb-5 pt-24 md:px-8 ${fullscreen ? "min-h-screen xl:pt-28" : ""}`}>
+        {imageDropIndicator && (
+          <div
+            className="pointer-events-none absolute z-20 flex items-center gap-2"
+            style={{ left: imageDropIndicator.left, top: imageDropIndicator.top, width: imageDropIndicator.width }}
+          >
+            <span className="h-3 w-3 rounded-full bg-[#2f6f73] shadow-sm" />
+            <span className="h-1 flex-1 rounded-full bg-[#2f6f73] shadow-sm" />
+            <span className="rounded-full bg-[#172033] px-2 py-1 text-[11px] font-black uppercase text-white">
+              {imageDropIndicator.position === "before" ? "Encima" : "Debajo"} · {imageDropIndicator.align === "left" ? "Izquierda" : imageDropIndicator.align === "right" ? "Derecha" : "Centro"}
+            </span>
+          </div>
+        )}
         {selectedImage && imageTools && (
           <div
             className="absolute z-10 flex flex-wrap items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 p-2 shadow-soft backdrop-blur"
@@ -1468,6 +1568,10 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
           }}
           onClick={handleEditorClick}
           onPaste={handlePaste}
+          onDragStart={handleImageDragStart}
+          onDragOver={handleImageDragOver}
+          onDrop={handleImageDrop}
+          onDragEnd={handleImageDragEnd}
           onKeyUp={saveSelection}
           onMouseUp={saveSelection}
           onScroll={() => {

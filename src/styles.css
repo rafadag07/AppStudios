@@ -294,6 +294,12 @@ select {
   outline-offset: 4px;
 }
 
+.study-document img.dragging-editor-image {
+  opacity: 0.45;
+  outline: 4px dashed rgba(47, 111, 115, 0.45);
+  outline-offset: 6px;
+}
+
 .study-document .image-caption {
   margin-top: -0.4rem;
   color: #64748b;
