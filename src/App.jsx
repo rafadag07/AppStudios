@@ -2587,64 +2587,88 @@ async function exportThemeVisualPdf(subject, theme, options = { includeToc: true
   exportShell.style.background = "#f3efe6";
   exportShell.style.padding = "40px";
   exportShell.style.zIndex = "-1";
-
-  const page = document.createElement("div");
-  page.className = "study-document pdf-export-document";
-  page.style.width = "1000px";
-  page.style.minHeight = "1300px";
-  page.style.margin = "0 auto";
-  page.style.background = "#ffffff";
-  page.style.borderRadius = "8px";
-  page.style.boxShadow = "0 18px 50px rgba(15,23,42,0.12)";
-  page.style.padding = "64px";
-  page.style.color = "#0f172a";
-
-  const header = document.createElement("div");
-  header.style.marginBottom = "28px";
-  header.style.borderBottom = "1px solid rgba(15,23,42,0.12)";
-  header.style.paddingBottom = "16px";
-  header.innerHTML = `
-    <p style="margin:0 0 8px;font-size:14px;font-weight:900;letter-spacing:.18em;text-transform:uppercase;color:${subject.color || "#2f6f73"}">${escapeHtml(subject.name)}</p>
-    <h1 style="margin:0;font-size:34px;line-height:1.12;font-weight:900;color:#172033">${escapeHtml(theme.name)}</h1>
-  `;
-
-  page.appendChild(header);
-  page.append(...Array.from(sourceDocument.childNodes));
-  exportShell.appendChild(page);
   document.body.appendChild(exportShell);
 
   try {
-    const canvas = await html2canvas(page, {
-      backgroundColor: "#ffffff",
-      scale: 2,
-      useCORS: true,
-      logging: false,
-      windowWidth: 1120,
-    });
     const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pages = paginateExportDocument(exportShell, sourceDocument, subject, theme);
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 8;
-    const imageWidth = pageWidth - margin * 2;
-    const imageHeight = (canvas.height * imageWidth) / canvas.width;
-    const dataUrl = canvas.toDataURL("image/png", 1);
-    const contentHeight = pageHeight - margin * 2;
-    let remaining = imageHeight;
-    let y = margin;
 
-    pdf.addImage(dataUrl, "PNG", margin, y, imageWidth, imageHeight);
-    remaining -= contentHeight;
-    while (remaining > 0) {
-      pdf.addPage();
-      y = margin - (imageHeight - remaining);
-      pdf.addImage(dataUrl, "PNG", margin, y, imageWidth, imageHeight);
-      remaining -= contentHeight;
+    for (const [index, page] of pages.entries()) {
+      if (index > 0) pdf.addPage();
+      const canvas = await html2canvas(page, {
+        backgroundColor: "#ffffff",
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        windowWidth: 1120,
+      });
+      const dataUrl = canvas.toDataURL("image/png", 1);
+      pdf.addImage(dataUrl, "PNG", 0, 0, pageWidth, pageHeight);
     }
+
     addPageNumbers(pdf);
     pdf.save(`${safeFileName(subject.name)}-${safeFileName(theme.name)}.pdf`);
   } finally {
     exportShell.remove();
   }
+}
+
+function paginateExportDocument(exportShell, sourceDocument, subject, theme) {
+  const pageHeight = 1414;
+  const pages = [];
+  const sourceNodes = Array.from(sourceDocument.childNodes).filter((node) => node.textContent?.trim() || node.nodeType === Node.ELEMENT_NODE);
+
+  let page = createVisualPdfPage(subject, theme, pages.length === 0);
+  exportShell.appendChild(page);
+  pages.push(page);
+
+  sourceNodes.forEach((node) => {
+    const clone = node.cloneNode(true);
+    page.appendChild(clone);
+    const hasHeader = !!page.querySelector("[data-export-header]");
+    const singleContentOnPage = page.childNodes.length === (hasHeader ? 2 : 1);
+    if (page.scrollHeight > pageHeight && (!singleContentOnPage || hasHeader)) {
+      clone.remove();
+      page = createVisualPdfPage(subject, theme, false);
+      exportShell.appendChild(page);
+      pages.push(page);
+      page.appendChild(clone);
+    }
+  });
+
+  return pages;
+}
+
+function createVisualPdfPage(subject, theme, includeHeader) {
+  const page = document.createElement("div");
+  page.className = "study-document pdf-export-document";
+  page.style.width = "1000px";
+  page.style.height = "1414px";
+  page.style.boxSizing = "border-box";
+  page.style.overflow = "hidden";
+  page.style.margin = "0 auto 40px";
+  page.style.background = "#ffffff";
+  page.style.borderRadius = "8px";
+  page.style.boxShadow = "0 18px 50px rgba(15,23,42,0.12)";
+  page.style.padding = "64px 64px 96px";
+  page.style.color = "#0f172a";
+
+  if (includeHeader) {
+    const header = document.createElement("div");
+    header.dataset.exportHeader = "true";
+    header.style.marginBottom = "28px";
+    header.style.borderBottom = "1px solid rgba(15,23,42,0.12)";
+    header.style.paddingBottom = "16px";
+    header.innerHTML = `
+      <p style="margin:0 0 8px;font-size:14px;font-weight:900;letter-spacing:.18em;text-transform:uppercase;color:${subject.color || "#2f6f73"}">${escapeHtml(subject.name)}</p>
+      <h1 style="margin:0;font-size:34px;line-height:1.12;font-weight:900;color:#172033">${escapeHtml(theme.name)}</h1>
+    `;
+    page.appendChild(header);
+  }
+
+  return page;
 }
 
 function drawThemeDocumentHeader(ctx, subject, theme) {
