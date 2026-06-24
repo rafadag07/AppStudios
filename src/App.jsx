@@ -1020,6 +1020,41 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     saveDocument();
   };
 
+  const getCurrentEditableBlock = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !editorRef.current) return null;
+    let node = selection.anchorNode;
+    if (node?.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    return node?.closest?.("h1, h2, h3, h4, p, blockquote, li, div, pre") || null;
+  };
+
+  const toggleFormatBlock = (tag) => {
+    restoreSelection();
+    const currentBlock = getCurrentEditableBlock();
+    const currentTag = currentBlock?.tagName?.toLowerCase();
+    document.execCommand("formatBlock", false, currentTag === tag ? "p" : tag);
+    saveSelection();
+    saveDocument();
+  };
+
+  const changeSelectionFontSize = (delta) => {
+    restoreSelection();
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !editorRef.current) return;
+    const anchor = selection.anchorNode?.nodeType === Node.TEXT_NODE ? selection.anchorNode.parentElement : selection.anchorNode;
+    const currentSize = Number.parseFloat(window.getComputedStyle(anchor || editorRef.current).fontSize) || 18;
+    const nextSize = Math.min(44, Math.max(11, currentSize + delta));
+    document.execCommand("fontSize", false, "7");
+    editorRef.current.querySelectorAll('font[size="7"]').forEach((font) => {
+      const span = document.createElement("span");
+      span.style.fontSize = `${nextSize}px`;
+      span.innerHTML = font.innerHTML;
+      font.replaceWith(span);
+    });
+    saveSelection();
+    saveDocument();
+  };
+
   const insertHtml = (html) => {
     restoreSelection();
     document.execCommand("insertHTML", false, html);
@@ -1322,16 +1357,18 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   return (
     <section className={`${fullscreen ? "fixed inset-0 z-50 overflow-auto rounded-none" : "overflow-hidden rounded-lg"} border border-slate-900/10 bg-white shadow-soft`}>
       <div className={`${fullscreen ? "fixed left-0 right-0 top-0" : "fixed left-0 right-0 top-[68px] xl:left-72"} z-40 flex flex-wrap items-center gap-2 border-b border-slate-900/10 bg-slate-50/95 px-3 py-3 shadow-sm backdrop-blur md:px-8`}>
-        <EditorTool icon={Heading1} label="Título" onClick={() => runCommand("formatBlock", "h1")} />
-        <EditorTool icon={Heading2} label="Subtítulo 1" onClick={() => runCommand("formatBlock", "h2")} />
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("formatBlock", "h3")} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">S2</button>
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("formatBlock", "h4")} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">S3</button>
+        <EditorTool icon={Heading1} label="Título" onClick={() => toggleFormatBlock("h1")} />
+        <EditorTool icon={Heading2} label="Subtítulo 1" onClick={() => toggleFormatBlock("h2")} />
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => toggleFormatBlock("h3")} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">S2</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => toggleFormatBlock("h4")} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">S3</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => changeSelectionFontSize(-2)} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">A-</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => changeSelectionFontSize(2)} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">A+</button>
         <EditorTool icon={Bold} label="Negrita" onClick={() => runCommand("bold")} />
         <EditorTool icon={Italic} label="Cursiva" onClick={() => runCommand("italic")} />
         <EditorTool icon={Underline} label="Subrayado" onClick={() => runCommand("underline")} />
         <EditorTool icon={List} label="Lista" onClick={() => runCommand("insertUnorderedList")} />
         <EditorTool icon={ListOrdered} label="Lista numerada" onClick={() => runCommand("insertOrderedList")} />
-        <EditorTool icon={Quote} label="Cita" onClick={() => runCommand("formatBlock", "blockquote")} />
+        <EditorTool icon={Quote} label="Cita" onClick={() => toggleFormatBlock("blockquote")} />
         <EditorTool icon={Image} label="Imagen dentro del apunte" onClick={() => fileInputRef.current?.click()} />
         <select
           defaultValue=""
