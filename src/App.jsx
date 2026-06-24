@@ -1211,6 +1211,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
         navigator.clipboard?.writeText(codeContent?.innerText || "");
       }
       if (action === "edit" && codeContent) {
+        unhighlightCodeElement(codeContent);
         codeContent.focus();
         const range = document.createRange();
         range.selectNodeContents(codeContent);
@@ -1257,6 +1258,38 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     setSelectedBlock(null);
     setBlockTools(null);
     saveSelection();
+  };
+
+  const handleEditorFocus = (event) => {
+    const codeContent = event.target?.closest?.(".study-code-content");
+    if (!codeContent || !editorRef.current?.contains(codeContent)) return;
+    unhighlightCodeElement(codeContent);
+  };
+
+  const handleEditorBlur = (event) => {
+    const codeContent = event.target?.closest?.(".study-code-content");
+    if (!codeContent || !editorRef.current?.contains(codeContent)) return;
+    highlightCodeElement(codeContent);
+    saveDocument();
+  };
+
+  const handleEditorKeyDown = (event) => {
+    const codeContent = event.target?.closest?.(".study-code-content");
+    if (!codeContent || !editorRef.current?.contains(codeContent)) return;
+    if (event.key !== "Tab") return;
+    event.preventDefault();
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const tab = document.createTextNode("  ");
+    range.insertNode(tab);
+    range.setStartAfter(tab);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    savedRangeRef.current = range.cloneRange();
+    saveDocument();
   };
 
   const handlePaste = (event) => {
@@ -1567,6 +1600,9 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
             saveDocument();
           }}
           onClick={handleEditorClick}
+          onFocus={handleEditorFocus}
+          onBlur={handleEditorBlur}
+          onKeyDown={handleEditorKeyDown}
           onPaste={handlePaste}
           onDragStart={handleImageDragStart}
           onDragOver={handleImageDragOver}
@@ -2671,6 +2707,63 @@ function normalizeEditableBlocks(editor) {
   });
 }
 
+function highlightCodeBlocks(root) {
+  root.querySelectorAll(".study-code-content").forEach((code) => highlightCodeElement(code));
+}
+
+function unhighlightCodeElement(codeElement) {
+  if (!codeElement) return;
+  codeElement.textContent = codeElement.innerText.replace(/\n$/, "");
+}
+
+function highlightCodeElement(codeElement) {
+  if (!codeElement) return;
+  const block = codeElement.closest(".study-code-block");
+  const language = block?.dataset.codeLanguage || "Texto plano";
+  const rawCode = codeElement.innerText.replace(/\n$/, "");
+  codeElement.innerHTML = highlightCodeSyntax(rawCode, language);
+}
+
+function highlightCodeSyntax(code = "", language = "Texto plano") {
+  const keywords = getCodeKeywords(language);
+  const tokenRegex = /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][\w$]*(?=\s*\()|\b[A-Za-z_][\w$]*\b|[{}()[\];,.+\-*/%=<>!&|:]+)/g;
+  let output = "";
+  let lastIndex = 0;
+  for (const match of code.matchAll(tokenRegex)) {
+    const token = match[0];
+    output += escapeHtml(code.slice(lastIndex, match.index));
+    const isFunction = /^[A-Za-z_][\w$]*$/.test(token) && /^\s*\(/.test(code.slice(match.index + token.length));
+    output += renderCodeToken(token, keywords, isFunction);
+    lastIndex = match.index + token.length;
+  }
+  output += escapeHtml(code.slice(lastIndex));
+  return output || "Escribe aqui tu codigo...";
+}
+
+function renderCodeToken(token, keywords, isFunction = false) {
+  if (/^(\/\/|#|\/\*|<!--)/.test(token)) return `<span class="code-token-comment">${escapeHtml(token)}</span>`;
+  if (/^["'`]/.test(token)) return `<span class="code-token-string">${escapeHtml(token)}</span>`;
+  if (/^\d/.test(token)) return `<span class="code-token-number">${escapeHtml(token)}</span>`;
+  if (/^[{}()[\];,.+\-*/%=<>!&|:]+$/.test(token)) return `<span class="code-token-operator">${escapeHtml(token)}</span>`;
+  if (keywords.has(token)) return `<span class="code-token-keyword">${escapeHtml(token)}</span>`;
+  if (isFunction) return `<span class="code-token-function">${escapeHtml(token)}</span>`;
+  if (/^[A-Za-z_][\w$]*$/.test(token)) return `<span class="code-token-variable">${escapeHtml(token)}</span>`;
+  return escapeHtml(token);
+}
+
+function getCodeKeywords(language = "") {
+  const common = ["if", "else", "for", "while", "do", "switch", "case", "break", "continue", "return", "class", "public", "private", "protected", "static", "const", "new", "try", "catch", "throw", "true", "false", "null", "void"];
+  const byLanguage = {
+    "C++": ["int", "long", "double", "float", "char", "bool", "string", "vector", "map", "set", "queue", "stack", "auto", "namespace", "using", "include", "define", "template", "typename", "struct"],
+    JavaScript: ["let", "var", "const", "function", "async", "await", "import", "export", "from", "default", "extends", "this", "undefined", "typeof"],
+    "HTML / CSS": ["html", "head", "body", "div", "span", "section", "article", "header", "footer", "main", "class", "id", "style", "display", "flex", "grid", "color", "background", "margin", "padding"],
+    Python: ["def", "lambda", "self", "None", "True", "False", "elif", "in", "is", "not", "and", "or", "import", "from", "as", "with", "yield", "pass"],
+    PHP: ["php", "echo", "function", "array", "namespace", "use", "extends", "implements", "public", "private", "protected"],
+    Pseudocodigo: ["si", "sino", "para", "mientras", "hacer", "devolver", "funcion", "inicio", "fin", "entonces", "hasta"],
+  };
+  return new Set([...(byLanguage[language] || []), ...common]);
+}
+
 function getDocumentHeadings(editor) {
   return Array.from(editor.querySelectorAll("h1, h2, h3, h4"))
     .filter((heading) => !heading.closest(".auto-toc"))
@@ -2712,6 +2805,7 @@ async function exportThemeVisualPdf(subject, theme, options = { includeToc: true
 
   normalizeEditableBlocks(sourceDocument);
   updateDocumentToc(sourceDocument);
+  highlightCodeBlocks(sourceDocument);
   sourceDocument.querySelectorAll(".selected-study-block, .selected-editor-image").forEach((node) => {
     node.classList.remove("selected-study-block", "selected-editor-image");
   });
