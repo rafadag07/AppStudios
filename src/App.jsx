@@ -983,12 +983,14 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     normalizeEditableBlocks(editorRef.current);
     prepareEditorImages();
     refreshToc();
+    ensureEditableParagraph(editorRef.current);
   }, []);
 
   const saveDocument = () => {
     normalizeEditableBlocks(editorRef.current);
     prepareEditorImages();
     refreshToc();
+    ensureEditableParagraph(editorRef.current);
     onChange(editorRef.current?.innerHTML || "");
   };
 
@@ -1318,15 +1320,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     if (!headingId || !editorRef.current) return;
     const heading = editorRef.current.querySelector(`#${CSS.escape(headingId)}`);
     if (!heading) return;
-    const level = Number(heading.tagName.slice(1));
-    const nodesToRemove = [heading];
-    let next = heading.nextSibling;
-    while (next) {
-      if (next.nodeType === Node.ELEMENT_NODE && /^H[1-4]$/.test(next.tagName) && Number(next.tagName.slice(1)) <= level) break;
-      nodesToRemove.push(next);
-      next = next.nextSibling;
-    }
-    nodesToRemove.forEach((node) => node.remove());
+    heading.remove();
     saveDocument();
   };
 
@@ -2733,6 +2727,27 @@ function updateDocumentToc(editor) {
     })
     .join("");
   toc.innerHTML = `<h2>Índice</h2>${items || '<p class="toc-empty">Añade títulos y subtítulos para crear el índice.</p>'}`;
+}
+
+function ensureEditableParagraph(editor) {
+  if (!editor) return;
+  const hasEditableContent = Array.from(editor.childNodes).some((node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent.trim();
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    if (node.classList.contains("auto-toc")) return false;
+    return node.textContent.trim() || node.tagName === "IMG" || node.tagName === "TABLE";
+  });
+  if (hasEditableContent) return;
+  const paragraph = document.createElement("p");
+  paragraph.innerHTML = "<br>";
+  editor.appendChild(paragraph);
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  range.setStart(paragraph, 0);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 function normalizeEditableBlocks(editor) {
