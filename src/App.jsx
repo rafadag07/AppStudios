@@ -69,6 +69,12 @@ const statuses = ["nada", "medio", "estudiado"];
 const priorities = ["baja", "media", "alta"];
 const resourceTypes = ["link", "pdf", "video", "libro", "otro"];
 const SYNC_CODE_KEY = "summer-study-campus-sync-code";
+const subjectSections = [
+  { id: "teoria", label: "Teoría" },
+  { id: "seminarios", label: "Seminarios" },
+  { id: "practicas", label: "Prácticas" },
+  { id: "preguntas", label: "Preguntas" },
+];
 
 const iconMap = {
   network: Network,
@@ -749,8 +755,17 @@ function StudyThemeNode({ subject, theme, setView, setThemeStudyState }) {
 }
 
 function SubjectPage({ subject, setView, openModal, updateData }) {
+  const [activeSection, setActiveSection] = useState("teoria");
   const qaCount = subject.qa?.length || 0;
   const dominatedCount = subject.qa?.filter((item) => item.status === "dominada").length || 0;
+  const sectionThemes = subject.themes.filter((theme) => (theme.section || "teoria") === activeSection);
+  const changeThemeSection = (themeId, section) => {
+    updateData((draft) => {
+      const target = draft.subjects.find((item) => item.id === subject.id)?.themes.find((theme) => theme.id === themeId);
+      if (target) target.section = section;
+      return draft;
+    });
+  };
   return (
     <div className="space-y-5">
       <button onClick={() => setView({ page: "subjects" })} className="flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-slate-900">
@@ -765,16 +780,64 @@ function SubjectPage({ subject, setView, openModal, updateData }) {
           </div>
           <div className="flex gap-2">
             <ActionButton icon={Pencil} label="Editar" onClick={() => openModal({ type: "subject", item: subject })} />
-            <ActionButton icon={Plus} label="Tema" onClick={() => openModal({ type: "theme", subjectId: subject.id })} />
-            <ActionButton icon={HelpCircle} label={`Preguntas ${qaCount}/${dominatedCount}`} onClick={() => setView({ page: "subject-qa", subjectId: subject.id })} />
+            <ActionButton icon={Plus} label="Tema" onClick={() => openModal({ type: "theme", subjectId: subject.id, section: activeSection === "preguntas" ? "teoria" : activeSection })} />
           </div>
         </div>
       </section>
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {subject.themes.map((theme) => (
-          <ThemeCard key={theme.id} theme={theme} subject={subject} setView={setView} openModal={openModal} updateData={updateData} />
-        ))}
-      </div>
+      <section className="rounded-lg border border-slate-900/10 bg-white p-2 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {subjectSections.map((section) => {
+            const count = section.id === "preguntas" ? qaCount : subject.themes.filter((theme) => (theme.section || "teoria") === section.id).length;
+            const active = activeSection === section.id;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => setActiveSection(section.id)}
+                className={`rounded-lg px-4 py-3 text-sm font-black transition ${active ? "bg-[#172033] text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
+              >
+                {section.label} <span className={active ? "text-white/70" : "text-slate-400"}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+      {activeSection === "preguntas" ? (
+        <section className="rounded-lg border border-slate-900/10 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-black">Preguntas y respuestas</h2>
+              <p className="mt-1 text-sm text-slate-500">{qaCount} preguntas · {dominatedCount} dominadas</p>
+            </div>
+            <button onClick={() => setView({ page: "subject-qa", subjectId: subject.id })} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#172033] px-4 text-sm font-black text-white">
+              <HelpCircle size={18} /> Abrir preguntas
+            </button>
+          </div>
+        </section>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-black">{subjectSections.find((section) => section.id === activeSection)?.label}</h2>
+              <p className="text-sm text-slate-500">Temas de este apartado de la asignatura.</p>
+            </div>
+            <button onClick={() => openModal({ type: "theme", subjectId: subject.id, section: activeSection })} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#172033] px-4 text-sm font-black text-white">
+              <Plus size={18} /> Añadir aquí
+            </button>
+          </div>
+          {sectionThemes.length === 0 ? (
+            <section className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center shadow-sm">
+              <p className="font-black text-slate-500">Todavía no hay temas en este apartado.</p>
+            </section>
+          ) : (
+            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+              {sectionThemes.map((theme) => (
+                <ThemeCard key={theme.id} theme={theme} subject={subject} setView={setView} openModal={openModal} updateData={updateData} onSectionChange={changeThemeSection} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -2050,7 +2113,14 @@ function FormFields({ modal, form, set, data }) {
               <img src={form.coverImage} alt="" className="h-full w-full object-cover" />
             </div>
           )}
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="Apartado">
+              <select value={form.section || "teoria"} onChange={(event) => set("section", event.target.value)} className="input">
+                {subjectSections.filter((section) => section.id !== "preguntas").map((section) => (
+                  <option key={section.id} value={section.id}>{section.label}</option>
+                ))}
+              </select>
+            </Field>
             <Field label="Estado"><Select value={form.status} onChange={(v) => set("status", v)} options={statuses} /></Field>
             <Field label="Prioridad"><Select value={form.priority} onChange={(v) => set("priority", v)} options={priorities} /></Field>
             <Field label="Fecha objetivo"><input type="date" value={form.targetDate} onChange={(e) => set("targetDate", e.target.value)} className="input" /></Field>
@@ -2122,6 +2192,7 @@ function saveModal(draft, modal, form) {
       ...form,
       id: modal.item?.id || createId("theme"),
       subjectId: modal.subjectId,
+      section: form.section || modal.item?.section || modal.section || "teoria",
       notes: modal.item?.notes || [],
       sections: modal.item?.sections || [],
       media: modal.item?.media || [],
@@ -2212,13 +2283,14 @@ function getInitialForm(modal) {
   if (modal.item) {
     return {
       ...modal.item,
+      section: modal.item.section || "teoria",
       status: modal.type === "theme" ? normalizeStudyState(modal.item.status) : modal.item.status,
       title: modal.item.title || modal.item.name || modal.item.question || modal.item.label || "",
     };
   }
   const base = { title: "", name: "", description: "", url: "", body: "", content: "", question: "", label: "" };
   if (modal.type === "subject") return { ...base, name: "", color: "#2f6f73", icon: "network", targetDate: todayIso() };
-  if (modal.type === "theme") return { ...base, name: "", status: "pendiente", priority: "media", targetDate: todayIso(), coverImage: "" };
+  if (modal.type === "theme") return { ...base, name: "", section: modal.section || "teoria", status: "pendiente", priority: "media", targetDate: todayIso(), coverImage: "" };
   if (modal.type === "task") return { ...base, subjectId: "", themeId: "", dueDate: todayIso(), priority: "media" };
   if (modal.type === "resource") return { ...base, type: "link" };
   if (modal.type === "event") return { ...base, date: modal.date || todayIso(), subjectId: "", start: "", end: "", description: "" };
@@ -2266,7 +2338,7 @@ function SubjectCard({ subject, setView, openModal, updateData, large = false })
   );
 }
 
-function ThemeCard({ theme, subject, setView, openModal }) {
+function ThemeCard({ theme, subject, setView, openModal, onSectionChange }) {
   const fallback = getThemeCover(theme, subject);
   return (
     <article className="group overflow-hidden rounded-lg border border-slate-900/10 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-soft">
@@ -2302,6 +2374,17 @@ function ThemeCard({ theme, subject, setView, openModal }) {
             Abrir
           </button>
         </div>
+        {onSectionChange && (
+          <select
+            value={theme.section || "teoria"}
+            onChange={(event) => onSectionChange(theme.id, event.target.value)}
+            className="mt-3 w-full rounded-lg border border-slate-900/10 bg-slate-50 px-3 py-2 text-xs font-black uppercase text-slate-500 outline-none"
+          >
+            {subjectSections.filter((section) => section.id !== "preguntas").map((section) => (
+              <option key={section.id} value={section.id}>{section.label}</option>
+            ))}
+          </select>
+        )}
       </div>
     </article>
   );
