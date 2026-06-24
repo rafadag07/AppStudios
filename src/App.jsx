@@ -1154,6 +1154,20 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     `);
   };
 
+  const insertComparisonTable = () => {
+    insertHtml(`
+      <table class="study-table">
+        <thead>
+          <tr><th>Concepto</th><th>Ventajas</th><th>Inconvenientes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Elemento A</td><td>...</td><td>...</td></tr>
+          <tr><td>Elemento B</td><td>...</td><td>...</td></tr>
+        </tbody>
+      </table><p><br></p>
+    `);
+  };
+
   const createQuestionFromSelection = () => {
     const text = window.getSelection()?.toString() || "";
     if (text.trim()) onCreateQuestion?.(text);
@@ -1201,6 +1215,14 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   };
 
   const handleEditorClick = (event) => {
+    const tocDelete = event.target?.closest?.("[data-toc-delete]");
+    if (tocDelete) {
+      event.preventDefault();
+      event.stopPropagation();
+      deleteSectionFromToc(tocDelete.dataset.tocDelete);
+      return;
+    }
+
     const codeAction = event.target?.closest?.("[data-code-action]");
     if (codeAction) {
       event.preventDefault();
@@ -1274,21 +1296,37 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   };
 
   const handleEditorKeyDown = (event) => {
-    const codeContent = event.target?.closest?.(".study-code-content");
-    if (!codeContent || !editorRef.current?.contains(codeContent)) return;
     if (event.key !== "Tab") return;
+    if (!editorRef.current?.contains(event.target)) return;
     event.preventDefault();
+    const codeContent = event.target?.closest?.(".study-code-content");
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
     const range = selection.getRangeAt(0);
     range.deleteContents();
-    const tab = document.createTextNode("  ");
+    const tab = document.createTextNode(codeContent ? "  " : "\u00a0\u00a0\u00a0\u00a0");
     range.insertNode(tab);
     range.setStartAfter(tab);
     range.collapse(true);
     selection.removeAllRanges();
     selection.addRange(range);
     savedRangeRef.current = range.cloneRange();
+    saveDocument();
+  };
+
+  const deleteSectionFromToc = (headingId) => {
+    if (!headingId || !editorRef.current) return;
+    const heading = editorRef.current.querySelector(`#${CSS.escape(headingId)}`);
+    if (!heading) return;
+    const level = Number(heading.tagName.slice(1));
+    const nodesToRemove = [heading];
+    let next = heading.nextSibling;
+    while (next) {
+      if (next.nodeType === Node.ELEMENT_NODE && /^H[1-4]$/.test(next.tagName) && Number(next.tagName.slice(1)) <= level) break;
+      nodesToRemove.push(next);
+      next = next.nextSibling;
+    }
+    nodesToRemove.forEach((node) => node.remove());
     saveDocument();
   };
 
@@ -1491,6 +1529,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
         <EditorTool icon={ListOrdered} label="Lista numerada" onClick={() => runCommand("insertOrderedList")} />
         <EditorTool icon={Quote} label="Cita" onClick={() => toggleFormatBlock("blockquote")} />
         <EditorTool icon={Image} label="Imagen dentro del apunte" onClick={() => fileInputRef.current?.click()} />
+        <EditorTool icon={Grid3X3} label="Insertar tabla comparativa" onClick={insertComparisonTable} />
         <select
           defaultValue=""
           onMouseDown={saveSelection}
@@ -2690,7 +2729,7 @@ function updateDocumentToc(editor) {
     .map((heading) => {
       const level = Number(heading.tagName.slice(1));
       const text = escapeHtml(heading.textContent.trim() || "Sin título");
-      return `<a class="toc-level-${level}" href="#${heading.id}">${text}</a>`;
+      return `<div class="toc-row toc-level-${level}"><a href="#${heading.id}">${text}</a><button type="button" data-toc-delete="${heading.id}" contenteditable="false" title="Borrar esta seccion">Borrar</button></div>`;
     })
     .join("");
   toc.innerHTML = `<h2>Índice</h2>${items || '<p class="toc-empty">Añade títulos y subtítulos para crear el índice.</p>'}`;
@@ -2809,6 +2848,7 @@ async function exportThemeVisualPdf(subject, theme, options = { includeToc: true
   sourceDocument.querySelectorAll(".selected-study-block, .selected-editor-image").forEach((node) => {
     node.classList.remove("selected-study-block", "selected-editor-image");
   });
+  sourceDocument.querySelectorAll("[data-toc-delete]").forEach((node) => node.remove());
   sourceDocument.querySelectorAll(".study-code-actions").forEach((node) => node.remove());
   sourceDocument.querySelectorAll("[contenteditable]").forEach((node) => node.removeAttribute("contenteditable"));
   if (!options.includeToc) sourceDocument.querySelectorAll(".auto-toc").forEach((node) => node.remove());
