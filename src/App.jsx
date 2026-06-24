@@ -76,6 +76,18 @@ const subjectSections = [
   { id: "preguntas", label: "Preguntas" },
 ];
 
+const defaultStudySections = subjectSections.filter((section) => section.id !== "preguntas");
+const questionsSection = subjectSections.find((section) => section.id === "preguntas");
+
+function getSubjectStudySections(subject) {
+  const sections = subject?.studySections?.length ? subject.studySections : defaultStudySections;
+  return sections.map((section) => ({ ...section }));
+}
+
+function getAllSubjectSections(subject) {
+  return [...getSubjectStudySections(subject), { ...questionsSection, label: subject?.questionsLabel || questionsSection.label }];
+}
+
 const iconMap = {
   network: Network,
   languages: Languages,
@@ -756,15 +768,75 @@ function StudyThemeNode({ subject, theme, setView, setThemeStudyState }) {
 
 function SubjectPage({ subject, setView, openModal, updateData }) {
   const [activeSection, setActiveSection] = useState("teoria");
+  const [sectionsOpen, setSectionsOpen] = useState(false);
+  const studySections = useMemo(() => getSubjectStudySections(subject), [subject.studySections]);
+  const allSections = useMemo(() => getAllSubjectSections(subject), [subject.studySections, subject.questionsLabel]);
+  const activeStudySection = studySections.find((section) => section.id === activeSection);
   const qaCount = subject.qa?.length || 0;
   const dominatedCount = subject.qa?.filter((item) => item.status === "dominada").length || 0;
   const sectionThemes = subject.themes.filter((theme) => (theme.section || "teoria") === activeSection);
+  useEffect(() => {
+    if (activeSection !== "preguntas" && !studySections.some((section) => section.id === activeSection)) {
+      setActiveSection(studySections[0]?.id || "teoria");
+    }
+  }, [activeSection, studySections, subject.id]);
   const changeThemeSection = (themeId, section) => {
     updateData((draft) => {
       const target = draft.subjects.find((item) => item.id === subject.id)?.themes.find((theme) => theme.id === themeId);
       if (target) target.section = section;
       return draft;
     });
+  };
+  const addSubjectSection = () => {
+    const label = window.prompt("Nombre del nuevo apartado");
+    if (!label?.trim()) return;
+    const nextId = createId("section");
+    updateData((draft) => {
+      const target = draft.subjects.find((item) => item.id === subject.id);
+      if (!target) return draft;
+      target.studySections = [...getSubjectStudySections(target), { id: nextId, label: label.trim() }];
+      return draft;
+    });
+    setActiveSection(nextId);
+    setSectionsOpen(false);
+  };
+  const renameSubjectSection = (section) => {
+    const label = window.prompt("Nuevo nombre del apartado", section.label);
+    if (!label?.trim()) return;
+    updateData((draft) => {
+      const target = draft.subjects.find((item) => item.id === subject.id);
+      if (!target) return draft;
+      target.studySections = getSubjectStudySections(target).map((item) => (item.id === section.id ? { ...item, label: label.trim() } : item));
+      return draft;
+    });
+  };
+  const renameQuestionsSection = () => {
+    const label = window.prompt("Nuevo nombre del apartado de preguntas", subject.questionsLabel || "Preguntas");
+    if (!label?.trim()) return;
+    updateData((draft) => {
+      const target = draft.subjects.find((item) => item.id === subject.id);
+      if (target) target.questionsLabel = label.trim();
+      return draft;
+    });
+  };
+  const deleteSubjectSection = (sectionId) => {
+    if (studySections.length <= 1) {
+      window.alert("Debe quedar al menos un apartado para los temas.");
+      return;
+    }
+    if (!window.confirm("Eliminar este apartado? Los temas se moveran a otro apartado.")) return;
+    const remaining = studySections.filter((section) => section.id !== sectionId);
+    const fallback = remaining[0]?.id || "teoria";
+    updateData((draft) => {
+      const target = draft.subjects.find((item) => item.id === subject.id);
+      if (!target) return draft;
+      target.studySections = remaining;
+      target.themes.forEach((theme) => {
+        if ((theme.section || "teoria") === sectionId) theme.section = fallback;
+      });
+      return draft;
+    });
+    if (activeSection === sectionId) setActiveSection(fallback);
   };
   return (
     <div className="space-y-5">
@@ -780,13 +852,13 @@ function SubjectPage({ subject, setView, openModal, updateData }) {
           </div>
           <div className="flex gap-2">
             <ActionButton icon={Pencil} label="Editar" onClick={() => openModal({ type: "subject", item: subject })} />
-            <ActionButton icon={Plus} label="Tema" onClick={() => openModal({ type: "theme", subjectId: subject.id, section: activeSection === "preguntas" ? "teoria" : activeSection })} />
+            <ActionButton icon={Plus} label="Tema" onClick={() => openModal({ type: "theme", subjectId: subject.id, section: activeSection === "preguntas" ? studySections[0]?.id || "teoria" : activeSection })} />
           </div>
         </div>
       </section>
       <section className="rounded-lg border border-slate-900/10 bg-white p-2 shadow-sm">
-        <div className="flex flex-wrap gap-2">
-          {subjectSections.map((section) => {
+        <div className="flex flex-wrap items-center gap-2">
+          {allSections.map((section) => {
             const count = section.id === "preguntas" ? qaCount : subject.themes.filter((theme) => (theme.section || "teoria") === section.id).length;
             const active = activeSection === section.id;
             return (
@@ -800,8 +872,50 @@ function SubjectPage({ subject, setView, openModal, updateData }) {
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() => setSectionsOpen((value) => !value)}
+            className="ml-auto inline-flex h-10 items-center gap-2 rounded-lg bg-slate-100 px-3 text-xs font-black text-slate-600 transition hover:bg-slate-200 hover:text-slate-900"
+          >
+            <Pencil size={15} /> Apartados
+          </button>
         </div>
       </section>
+      {sectionsOpen && (
+        <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-black">Modificar apartados</h2>
+              <p className="text-sm text-slate-500">Cambia los nombres, anade apartados o elimina los que no uses.</p>
+            </div>
+            <button type="button" onClick={addSubjectSection} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#172033] px-3 text-sm font-black text-white">
+              <Plus size={16} /> Anadir
+            </button>
+          </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {studySections.map((section) => (
+              <div key={section.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-900/10 bg-slate-50 p-2">
+                <span className="truncate px-2 text-sm font-black text-slate-700">{section.label}</span>
+                <div className="flex shrink-0 gap-1">
+                  <button type="button" onClick={() => renameSubjectSection(section)} className="rounded-lg bg-white px-2 py-2 text-xs font-black text-slate-600 shadow-sm hover:text-slate-900">
+                    Editar
+                  </button>
+                  <button type="button" onClick={() => deleteSubjectSection(section.id)} className="rounded-lg bg-rose-50 px-2 py-2 text-xs font-black text-rose-700 shadow-sm hover:bg-rose-100">
+                    Borrar
+                  </button>
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+              <span className="truncate px-2 text-sm font-black text-emerald-800">{subject.questionsLabel || "Preguntas"}</span>
+              <button type="button" onClick={renameQuestionsSection} className="rounded-lg bg-white px-2 py-2 text-xs font-black text-emerald-800 shadow-sm hover:text-emerald-950">
+                Editar nombre
+              </button>
+            </div>
+          </div>
+          <p className="mt-3 text-xs font-bold text-slate-400">El apartado de preguntas se puede renombrar, pero no borrar, porque guarda el banco de preguntas de la asignatura.</p>
+        </section>
+      )}
       {activeSection === "preguntas" ? (
         <section className="rounded-lg border border-slate-900/10 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -818,7 +932,7 @@ function SubjectPage({ subject, setView, openModal, updateData }) {
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-2xl font-black">{subjectSections.find((section) => section.id === activeSection)?.label}</h2>
+              <h2 className="text-2xl font-black">{activeStudySection?.label || "Apartado"}</h2>
               <p className="text-sm text-slate-500">Temas de este apartado de la asignatura.</p>
             </div>
             <button onClick={() => openModal({ type: "theme", subjectId: subject.id, section: activeSection })} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#172033] px-4 text-sm font-black text-white">
@@ -2057,6 +2171,8 @@ function EditorModal({ modal, close, data, updateData }) {
 function FormFields({ modal, form, set, data }) {
   const subjects = data.subjects;
   const themes = subjects.find((subject) => subject.id === form.subjectId)?.themes || [];
+  const modalSubject = subjects.find((subject) => subject.id === modal.subjectId || subject.id === form.subjectId);
+  const themeSectionOptions = getSubjectStudySections(modalSubject);
   const commonTextArea = ["theme", "theme-note", "theme-section", "exercise", "doubt"].includes(modal.type);
 
   return (
@@ -2116,7 +2232,7 @@ function FormFields({ modal, form, set, data }) {
           <div className="grid gap-3 md:grid-cols-4">
             <Field label="Apartado">
               <select value={form.section || "teoria"} onChange={(event) => set("section", event.target.value)} className="input">
-                {subjectSections.filter((section) => section.id !== "preguntas").map((section) => (
+                {themeSectionOptions.map((section) => (
                   <option key={section.id} value={section.id}>{section.label}</option>
                 ))}
               </select>
@@ -2185,7 +2301,7 @@ function saveModal(draft, modal, form) {
     if (index >= 0) list[index] = item;
     else list.push(item);
   };
-  if (modal.type === "subject") upsert(draft.subjects, { ...form, id: modal.item?.id || createId("subject"), themes: modal.item?.themes || [], qa: modal.item?.qa || [] });
+  if (modal.type === "subject") upsert(draft.subjects, { ...form, id: modal.item?.id || createId("subject"), themes: modal.item?.themes || [], qa: modal.item?.qa || [], studySections: modal.item?.studySections || form.studySections, questionsLabel: modal.item?.questionsLabel || form.questionsLabel });
   if (modal.type === "theme") {
     const subject = draft.subjects.find((entry) => entry.id === modal.subjectId);
     upsert(subject.themes, {
@@ -2380,7 +2496,7 @@ function ThemeCard({ theme, subject, setView, openModal, onSectionChange }) {
             onChange={(event) => onSectionChange(theme.id, event.target.value)}
             className="mt-3 w-full rounded-lg border border-slate-900/10 bg-slate-50 px-3 py-2 text-xs font-black uppercase text-slate-500 outline-none"
           >
-            {subjectSections.filter((section) => section.id !== "preguntas").map((section) => (
+            {getSubjectStudySections(subject).map((section) => (
               <option key={section.id} value={section.id}>{section.label}</option>
             ))}
           </select>
