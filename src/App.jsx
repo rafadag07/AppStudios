@@ -1152,12 +1152,15 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const [imageDropIndicator, setImageDropIndicator] = useState(null);
   const [selectedBlock, setSelectedBlock] = useState(null);
   const [blockTools, setBlockTools] = useState(null);
+  const [selectedTable, setSelectedTable] = useState(null);
+  const [tableTools, setTableTools] = useState(null);
   const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
     if (!editorRef.current) return;
     editorRef.current.innerHTML = value || emptyThemeDocument();
     normalizeEditableBlocks(editorRef.current);
+    prepareEditorTables();
     prepareEditorImages();
     refreshToc();
     ensureEditableParagraph(editorRef.current);
@@ -1165,6 +1168,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
 
   const saveDocument = () => {
     normalizeEditableBlocks(editorRef.current);
+    prepareEditorTables();
     prepareEditorImages();
     refreshToc();
     ensureEditableParagraph(editorRef.current);
@@ -1335,13 +1339,13 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
 
   const insertComparisonTable = () => {
     insertHtml(`
-      <table class="study-table">
+      <table class="study-table" data-study-table="true">
         <thead>
-          <tr><th>Concepto</th><th>Ventajas</th><th>Inconvenientes</th></tr>
+          <tr><th><br></th><th><br></th><th><br></th></tr>
         </thead>
         <tbody>
-          <tr><td>Elemento A</td><td>...</td><td>...</td></tr>
-          <tr><td>Elemento B</td><td>...</td><td>...</td></tr>
+          <tr><td><br></td><td><br></td><td><br></td></tr>
+          <tr><td><br></td><td><br></td><td><br></td></tr>
         </tbody>
       </table><p><br></p>
     `);
@@ -1428,13 +1432,31 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
       }
       return;
     }
+    const table = event.target?.closest?.(".study-table");
+    if (table && editorRef.current?.contains(table)) {
+      selectedImage?.classList.remove("selected-editor-image");
+      selectedBlock?.classList.remove("selected-study-block");
+      selectedTable?.classList.remove("selected-study-table");
+      table.classList.add("selected-study-table");
+      setSelectedImage(null);
+      setImageTools(null);
+      setSelectedBlock(null);
+      setBlockTools(null);
+      setSelectedTable(table);
+      updateTableToolsPosition(table);
+      saveSelection();
+      return;
+    }
     const block = event.target?.closest?.("[data-study-block], .study-block, .study-code-block");
     if (block && editorRef.current?.contains(block)) {
       selectedImage?.classList.remove("selected-editor-image");
       selectedBlock?.classList.remove("selected-study-block");
+      selectedTable?.classList.remove("selected-study-table");
       block.classList.add("selected-study-block");
       setSelectedImage(null);
       setImageTools(null);
+      setSelectedTable(null);
+      setTableTools(null);
       setSelectedBlock(block);
       updateBlockToolsPosition(block);
       saveSelection();
@@ -1443,10 +1465,13 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     if (event.target?.tagName === "IMG") {
       selectedImage?.classList.remove("selected-editor-image");
       selectedBlock?.classList.remove("selected-study-block");
+      selectedTable?.classList.remove("selected-study-table");
       event.target.classList.add("selected-editor-image");
       setSelectedImage(event.target);
       setSelectedBlock(null);
       setBlockTools(null);
+      setSelectedTable(null);
+      setTableTools(null);
       const width = Number.parseInt(event.target.style.width, 10);
       setImageWidth(Number.isFinite(width) ? width : 70);
       updateImageToolsPosition(event.target);
@@ -1454,10 +1479,13 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     }
     selectedImage?.classList.remove("selected-editor-image");
     selectedBlock?.classList.remove("selected-study-block");
+    selectedTable?.classList.remove("selected-study-table");
     setSelectedImage(null);
     setImageTools(null);
     setSelectedBlock(null);
     setBlockTools(null);
+    setSelectedTable(null);
+    setTableTools(null);
     saveSelection();
   };
 
@@ -1577,6 +1605,60 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     saveDocument();
   };
 
+  const getSelectedTableColumnCount = () => {
+    const firstRow = selectedTable?.rows?.[0];
+    return firstRow?.cells?.length || 0;
+  };
+
+  const addTableRow = () => {
+    if (!selectedTable) return;
+    const tbody = selectedTable.tBodies[0] || selectedTable.createTBody();
+    const columns = Math.max(1, getSelectedTableColumnCount());
+    const row = tbody.insertRow();
+    for (let index = 0; index < columns; index += 1) {
+      row.insertCell().innerHTML = "<br>";
+    }
+    window.requestAnimationFrame(() => updateTableToolsPosition(selectedTable));
+    saveDocument();
+  };
+
+  const removeTableRow = () => {
+    if (!selectedTable) return;
+    const tbody = selectedTable.tBodies[0];
+    if (!tbody || tbody.rows.length <= 1) return;
+    tbody.deleteRow(tbody.rows.length - 1);
+    window.requestAnimationFrame(() => updateTableToolsPosition(selectedTable));
+    saveDocument();
+  };
+
+  const addTableColumn = () => {
+    if (!selectedTable) return;
+    Array.from(selectedTable.rows).forEach((row) => {
+      const cell = row.parentElement?.tagName === "THEAD" ? document.createElement("th") : document.createElement("td");
+      cell.innerHTML = "<br>";
+      row.appendChild(cell);
+    });
+    window.requestAnimationFrame(() => updateTableToolsPosition(selectedTable));
+    saveDocument();
+  };
+
+  const removeTableColumn = () => {
+    if (!selectedTable) return;
+    const columns = getSelectedTableColumnCount();
+    if (columns <= 1) return;
+    Array.from(selectedTable.rows).forEach((row) => row.deleteCell(columns - 1));
+    window.requestAnimationFrame(() => updateTableToolsPosition(selectedTable));
+    saveDocument();
+  };
+
+  const deleteSelectedTable = () => {
+    if (!selectedTable) return;
+    selectedTable.remove();
+    setSelectedTable(null);
+    setTableTools(null);
+    saveDocument();
+  };
+
   const addImageCaption = () => {
     if (!selectedImage) return;
     const caption = document.createElement("p");
@@ -1608,11 +1690,28 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     });
   };
 
+  const updateTableToolsPosition = (table) => {
+    if (!table || !editorFrameRef.current) return;
+    const tableRect = table.getBoundingClientRect();
+    const frameRect = editorFrameRef.current.getBoundingClientRect();
+    setTableTools({
+      left: Math.max(12, tableRect.left - frameRect.left),
+      top: Math.max(12, tableRect.top - frameRect.top - 54),
+      width: tableRect.width,
+    });
+  };
+
   const prepareEditorImages = () => {
     editorRef.current?.querySelectorAll("img").forEach((image) => {
       image.draggable = true;
       image.setAttribute("draggable", "true");
       image.dataset.editableImage = "true";
+    });
+  };
+
+  const prepareEditorTables = () => {
+    editorRef.current?.querySelectorAll(".study-table").forEach((table) => {
+      table.dataset.studyTable = "true";
     });
   };
 
@@ -1801,6 +1900,19 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
             <EditorTool icon={Trash2} label="Eliminar bloque" onClick={deleteSelectedBlock} />
           </div>
         )}
+        {selectedTable && tableTools && (
+          <div
+            className="absolute z-10 flex flex-wrap items-center gap-2 rounded-lg border border-slate-900/10 bg-white/95 p-2 shadow-soft backdrop-blur"
+            style={{ left: tableTools.left, top: tableTools.top, maxWidth: "calc(100% - 24px)" }}
+          >
+            <span className="text-xs font-black uppercase text-slate-500">Tabla</span>
+            <button type="button" onClick={addTableRow} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">+ Fila</button>
+            <button type="button" onClick={removeTableRow} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">- Fila</button>
+            <button type="button" onClick={addTableColumn} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">+ Columna</button>
+            <button type="button" onClick={removeTableColumn} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">- Columna</button>
+            <EditorTool icon={Trash2} label="Eliminar tabla" onClick={deleteSelectedTable} />
+          </div>
+        )}
         <div
           ref={editorRef}
           contentEditable
@@ -1823,6 +1935,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
           onScroll={() => {
             if (selectedImage) updateImageToolsPosition(selectedImage);
             if (selectedBlock) updateBlockToolsPosition(selectedBlock);
+            if (selectedTable) updateTableToolsPosition(selectedTable);
           }}
           className={`study-document mx-auto rounded bg-white text-slate-900 shadow-soft outline-none ${fullscreen ? "min-h-[calc(100vh-132px)] w-full max-w-[1120px] px-8 py-9 md:px-16 md:py-14" : "min-h-[920px] w-full max-w-none px-8 py-9 md:px-16 md:py-14"}`}
         />
