@@ -823,14 +823,107 @@ function Dashboard({ data, stats, allThemes, setView, openModal, updateData, que
 
 function SubjectsPage({ data, setView, openModal, updateData, query }) {
   const subjects = filterItems(data.subjects, query, ["name", "description"]);
+  const [draggingSubjectId, setDraggingSubjectId] = useState(null);
+  const [dragOverSubjectId, setDragOverSubjectId] = useState(null);
+  const totalThemes = data.subjects.reduce((sum, subject) => sum + subject.themes.length, 0);
+  const totalQuestions = data.subjects.reduce((sum, subject) => sum + (subject.qa?.length || 0), 0);
+  const hasQuery = query.trim().length > 0;
+
+  const moveSubjectBefore = (sourceId, targetId) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    updateData((draft) => {
+      const sourceIndex = draft.subjects.findIndex((subject) => subject.id === sourceId);
+      const targetIndex = draft.subjects.findIndex((subject) => subject.id === targetId);
+      if (sourceIndex < 0 || targetIndex < 0) return draft;
+      const [source] = draft.subjects.splice(sourceIndex, 1);
+      const nextTargetIndex = draft.subjects.findIndex((subject) => subject.id === targetId);
+      draft.subjects.splice(nextTargetIndex, 0, source);
+      return draft;
+    });
+  };
+
+  const subjectDragHandlers = (subject) => ({
+    draggable: !hasQuery,
+    onDragStart: (event) => {
+      if (hasQuery) return;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/appstudios-subject", subject.id);
+      setDraggingSubjectId(subject.id);
+    },
+    onDragOver: (event) => {
+      if (hasQuery) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setDragOverSubjectId(subject.id);
+    },
+    onDragLeave: () => {
+      setDragOverSubjectId((current) => (current === subject.id ? null : current));
+    },
+    onDrop: (event) => {
+      if (hasQuery) return;
+      event.preventDefault();
+      const sourceId = event.dataTransfer.getData("text/appstudios-subject") || draggingSubjectId;
+      moveSubjectBefore(sourceId, subject.id);
+      setDraggingSubjectId(null);
+      setDragOverSubjectId(null);
+    },
+    onDragEnd: () => {
+      setDraggingSubjectId(null);
+      setDragOverSubjectId(null);
+    },
+  });
+
   return (
-    <div className="space-y-5">
-      <PageTitle title="Asignaturas" subtitle="Organiza cada materia como un espacio propio dentro de AppStudios." action={() => openModal({ type: "subject" })} />
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div className="space-y-6">
+      <section className="overflow-hidden rounded-lg border border-slate-900/10 bg-white shadow-soft">
+        <div className="grid gap-4 bg-[#172033] p-6 text-white lg:grid-cols-[1.35fr_0.65fr]">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f4c36b]">Biblioteca de estudio</p>
+            <h1 className="mt-2 text-4xl font-black md:text-5xl">Asignaturas</h1>
+            <p className="mt-3 max-w-2xl text-base font-semibold text-white/72">
+              Ordena tus materias como quieras, entra rápido en cada campus y mantén visibles sus temas, apartados y preguntas.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <SubjectMetric label="Asignaturas" value={data.subjects.length} />
+            <SubjectMetric label="Temas" value={totalThemes} />
+            <SubjectMetric label="Preguntas" value={totalQuestions} />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <p className="text-sm font-bold text-slate-500">
+            {hasQuery ? "Filtro activo: el orden se cambia sin buscar." : "Arrastra una tarjeta y suéltala encima de otra para cambiar el orden."}
+          </p>
+          <button onClick={() => openModal({ type: "subject" })} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#172033] px-4 text-sm font-black text-white shadow-sm">
+            <Plus size={18} /> Crear asignatura
+          </button>
+        </div>
+      </section>
+
+      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         {subjects.map((subject) => (
-          <SubjectCard key={subject.id} subject={subject} setView={setView} openModal={openModal} updateData={updateData} large />
+          <SubjectCard
+            key={subject.id}
+            subject={subject}
+            setView={setView}
+            openModal={openModal}
+            updateData={updateData}
+            large
+            dragHandlers={subjectDragHandlers(subject)}
+            dragging={draggingSubjectId === subject.id}
+            dragOver={dragOverSubjectId === subject.id && draggingSubjectId !== subject.id}
+          />
         ))}
       </div>
+    </div>
+  );
+}
+
+function SubjectMetric({ label, value }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/10 p-3 backdrop-blur">
+      <p className="text-xs font-black uppercase tracking-[0.14em] text-white/55">{label}</p>
+      <p className="mt-2 text-3xl font-black">{value}</p>
     </div>
   );
 }
@@ -3928,28 +4021,78 @@ function contentListKey(modal) {
   return null;
 }
 
-function SubjectCard({ subject, setView, openModal, updateData, large = false }) {
+function SubjectCard({ subject, setView, openModal, updateData, large = false, dragHandlers = {}, dragging = false, dragOver = false }) {
+  const sections = getSubjectStudySections(subject);
+  const sectionPreview = sections.slice(0, 3).map((section) => ({
+    ...section,
+    count: subject.themes.filter((theme) => (theme.section || "teoria") === section.id).length,
+  }));
+  const questionCount = subject.qa?.length || 0;
+
   return (
-    <article className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft">
-      <div className="flex items-start justify-between gap-3">
-        <ColorIcon subject={subject} />
-        <div className="flex gap-1">
-          <IconButton icon={Pencil} label="Editar" onClick={() => openModal({ type: "subject", item: subject })} />
-          <IconButton icon={Plus} label="Añadir tema" onClick={() => openModal({ type: "theme", subjectId: subject.id })} />
-        </div>
+    <article
+      {...dragHandlers}
+      className={`group relative overflow-hidden rounded-lg border bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft ${
+        dragging ? "scale-[0.98] opacity-55" : ""
+      } ${dragOver ? "border-[#2f6f73] ring-4 ring-[#2f6f73]/15" : "border-slate-900/10"}`}
+    >
+      <div className="absolute inset-x-0 top-0 h-1.5" style={{ background: subject.color }} />
+      <div className="absolute right-4 top-4 flex gap-1">
+        <IconButton icon={Pencil} label="Editar" onClick={() => openModal({ type: "subject", item: subject })} />
+        <IconButton icon={Plus} label="Añadir tema" onClick={() => openModal({ type: "theme", subjectId: subject.id })} />
       </div>
-      <h3 className="mt-4 text-xl font-black">{subject.name}</h3>
-      <p className={`mt-2 text-sm text-slate-600 ${large ? "" : "line-clamp-2"}`}>{subject.description}</p>
-      <div className="mt-4 flex items-center justify-between">
-        <span className="text-sm font-bold text-slate-500">{subject.themes.length} temas</span>
-        <button onClick={() => setView({ page: "subject", subjectId: subject.id })} className="rounded-lg bg-[#172033] px-3 py-2 text-sm font-black text-white">
-          Entrar
-        </button>
+
+      <div className="p-5">
+        <div className="flex items-start gap-4 pr-24">
+          <ColorIcon subject={subject} />
+          <button
+            type="button"
+            onClick={() => setView({ page: "subject", subjectId: subject.id })}
+            className="min-w-0 flex-1 text-left"
+          >
+            <h3 className="line-clamp-2 text-2xl font-black leading-tight group-hover:text-[#1f5d55]">{subject.name}</h3>
+            <p className={`mt-2 text-sm leading-relaxed text-slate-600 ${large ? "line-clamp-3" : "line-clamp-2"}`}>{subject.description}</p>
+          </button>
+        </div>
+
+        <div className="mt-5 grid grid-cols-3 gap-2">
+          <div className="rounded-lg bg-slate-50 p-3">
+            <p className="text-xs font-black uppercase text-slate-400">Temas</p>
+            <p className="mt-1 text-2xl font-black">{subject.themes.length}</p>
+          </div>
+          <div className="rounded-lg bg-slate-50 p-3">
+            <p className="text-xs font-black uppercase text-slate-400">Apartados</p>
+            <p className="mt-1 text-2xl font-black">{sections.length + 1}</p>
+          </div>
+          <div className="rounded-lg bg-slate-50 p-3">
+            <p className="text-xs font-black uppercase text-slate-400">Preguntas</p>
+            <p className="mt-1 text-2xl font-black">{questionCount}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {sectionPreview.map((section) => (
+            <span key={section.id} className="rounded-full border border-slate-900/10 bg-white px-3 py-1 text-xs font-black text-slate-500">
+              {section.label} {section.count}
+            </span>
+          ))}
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
+            Preguntas {questionCount}
+          </span>
+        </div>
+
+        <div className="mt-5 flex items-center justify-between gap-3 border-t border-slate-900/10 pt-4">
+          <span className="inline-flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs font-black uppercase text-slate-400" title="Arrastra para ordenar">
+            <Menu size={15} /> Mover
+          </span>
+          <button onClick={() => setView({ page: "subject", subjectId: subject.id })} className="rounded-lg bg-[#172033] px-4 py-3 text-sm font-black text-white">
+            Entrar
+          </button>
+        </div>
       </div>
     </article>
   );
 }
-
 function ThemeCard({ theme, subject, setView, openModal, onSectionChange }) {
   const fallback = getThemeCover(theme, subject);
   return (
