@@ -1247,6 +1247,7 @@ function ThemePage({ subject, theme, openModal, updateData, setView, syncStatus 
               <div className="space-y-2">
                 {(theme.reviewLater || []).map((item) => (
                   <div key={item.id} className="rounded-lg bg-slate-50 p-3 text-sm">
+                    {item.imageDataUrl && <img src={item.imageDataUrl} alt="" className="mb-2 max-h-40 w-full rounded-lg object-contain bg-white" />}
                     <p className="line-clamp-3 font-semibold text-slate-700">{item.text}</p>
                     <p className="mt-2 text-xs font-black uppercase text-slate-400">{item.pdfName} · pÃ¡gina {item.page}</p>
                   </div>
@@ -1405,32 +1406,40 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
     setPageNumber(nextPage);
   };
 
-  const selectedText = selection?.text?.trim() || "";
+  const selectedText = selection?.text || "";
+  const selectedSnapshot = selection?.imageDataUrl || "";
+  const hasSelectedContent = selectedText.trim() || selectedSnapshot;
   const addTextToNotes = () => {
-    if (!selectedText) return;
+    if (!hasSelectedContent) return;
     updateData((draft) => {
       const target = findTheme(draft, subject.id, theme.id);
-      target.documentHtml = `${target.documentHtml || buildThemeDocument(target)}
-        <blockquote data-pdf-source="${file.id}" data-pdf-page="${pageNumber}">
-          <strong>Fragmento de PDF: ${escapeHtml(file.name)}, pagina ${pageNumber}</strong>
-          <p>${escapeHtml(selectedText)}</p>
-        </blockquote>`;
+      const content = selectedSnapshot
+        ? `<figure class="pdf-selection-note" data-pdf-source="${file.id}" data-pdf-page="${pageNumber}">
+            <img src="${selectedSnapshot}" alt="Fragmento de ${escapeHtml(file.name)}" />
+            <figcaption>Fragmento de PDF: ${escapeHtml(file.name)}, pagina ${pageNumber}</figcaption>
+          </figure>`
+        : `<blockquote data-pdf-source="${file.id}" data-pdf-page="${pageNumber}">
+            <strong>Fragmento de PDF: ${escapeHtml(file.name)}, pagina ${pageNumber}</strong>
+            <pre>${escapeHtml(selectedText)}</pre>
+          </blockquote>`;
+      target.documentHtml = `${target.documentHtml || buildThemeDocument(target)}${content}`;
       return draft;
     });
     setSelection(null);
   };
 
   const addDoubt = () => {
-    if (!selectedText) return;
+    if (!hasSelectedContent) return;
     updateData((draft) => {
       const target = findTheme(draft, subject.id, theme.id);
       if (!target.doubts) target.doubts = [];
       target.doubts.push({
         id: createId("doubt"),
-        question: selectedText,
+        question: selectedText.trim() || `Revisar imagen seleccionada de ${file.name}, pagina ${pageNumber}`,
         resolved: false,
         sourcePdfName: file.name,
         sourcePdfPage: pageNumber,
+        sourcePdfSnapshot: selectedSnapshot,
         createdAt: new Date().toISOString(),
       });
       return draft;
@@ -1439,13 +1448,14 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
   };
 
   const markForReview = () => {
-    if (!selectedText) return;
+    if (!hasSelectedContent) return;
     updateData((draft) => {
       const target = findTheme(draft, subject.id, theme.id);
       if (!target.reviewLater) target.reviewLater = [];
       target.reviewLater.unshift({
         id: createId("review"),
-        text: selectedText,
+        text: selectedText.trim() || "Fragmento visual del PDF",
+        imageDataUrl: selectedSnapshot,
         pdfName: file.name,
         pdfId: file.id,
         page: pageNumber,
@@ -1457,8 +1467,13 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
   };
 
   const openQuestionModal = () => {
-    if (!selectedText) return;
-    setQuestionDraft({ question: selectedText, answer: "", status: "pendiente" });
+    if (!hasSelectedContent) return;
+    setQuestionDraft({
+      question: selectedText.trim() || `Explica el fragmento visual seleccionado de ${file.name}, pagina ${pageNumber}`,
+      answer: "",
+      status: "pendiente",
+      sourcePdfSnapshot: selectedSnapshot,
+    });
     setAnswerError("");
     setSelection(null);
   };
@@ -1482,6 +1497,7 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
         sourcePdfMediaId: file.id,
         sourcePdfName: file.name,
         sourcePdfPage: pageNumber,
+        sourcePdfSnapshot: questionDraft.sourcePdfSnapshot || "",
         createdAt: new Date().toISOString(),
       });
       return draft;
@@ -1551,6 +1567,12 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
             <Field label="Pregunta">
               <textarea value={questionDraft.question} onChange={(event) => setQuestionDraft((current) => ({ ...current, question: event.target.value }))} className="input min-h-28" />
             </Field>
+            {questionDraft.sourcePdfSnapshot && (
+              <div className="mt-4 rounded-lg border border-slate-900/10 bg-slate-50 p-3">
+                <p className="mb-2 text-xs font-black uppercase tracking-[0.14em] text-slate-400">Fragmento visual seleccionado</p>
+                <img src={questionDraft.sourcePdfSnapshot} alt="" className="max-h-72 w-full rounded-lg object-contain bg-white" />
+              </div>
+            )}
             <Field label="Respuesta">
               <textarea value={questionDraft.answer} onChange={(event) => {
                 setAnswerError("");
@@ -1580,6 +1602,7 @@ function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, onSelection }) {
   const canvasRef = useRef(null);
   const layerRef = useRef(null);
   const pageRef = useRef(null);
+  const dragStartRef = useRef(null);
   const [rendering, setRendering] = useState(true);
 
   useEffect(() => {
@@ -1628,26 +1651,31 @@ function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, onSelection }) {
     };
   }, [pdfDoc, pageNumber, zoom, search]);
 
-  const handleMouseDown = () => {
+  const handleMouseDown = (event) => {
+    dragStartRef.current = { x: event.clientX, y: event.clientY };
     layerRef.current?.classList.add("selecting");
     onSelection(null);
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (event) => {
     window.setTimeout(() => {
       layerRef.current?.classList.remove("selecting");
       const rangeSelection = window.getSelection();
-      const text = rangeSelection?.toString().replace(/\s+\n/g, "\n").trim();
-      if (!text || !pageRef.current) {
+      const hasRange = rangeSelection && rangeSelection.rangeCount > 0;
+      const anchorInside = hasRange && pageRef.current?.contains(rangeSelection.anchorNode);
+      const focusInside = hasRange && pageRef.current?.contains(rangeSelection.focusNode);
+      const range = hasRange && anchorInside && focusInside ? rangeSelection.getRangeAt(0) : null;
+      const text = range ? reconstructPdfSelectionText(range, layerRef.current) : "";
+      const dragRect = getPdfDragRect(dragStartRef.current, { x: event.clientX, y: event.clientY }, pageRef.current);
+      const imageDataUrl = !text.trim() && dragRect ? cropPdfCanvasSelection(canvasRef.current, pageRef.current, dragRect) : "";
+      if (!text.trim() && !imageDataUrl) {
         onSelection(null);
         return;
       }
-      const anchorInside = pageRef.current.contains(rangeSelection.anchorNode);
-      const focusInside = pageRef.current.contains(rangeSelection.focusNode);
-      if (!anchorInside || !focusInside) return;
-      const rect = rangeSelection.getRangeAt(0).getBoundingClientRect();
+      const rect = range ? range.getBoundingClientRect() : dragRect;
       onSelection({
         text,
+        imageDataUrl,
         x: Math.min(window.innerWidth - 260, Math.max(16, rect.left)),
         y: Math.min(window.innerHeight - 120, Math.max(16, rect.bottom + 10)),
       });
@@ -1669,6 +1697,100 @@ function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, onSelection }) {
       </div>
     </div>
   );
+}
+
+function reconstructPdfSelectionText(range, layer) {
+  if (!range || !layer) return "";
+  const nativeText = window.getSelection()?.toString() || "";
+  const spans = Array.from(layer.querySelectorAll("span"))
+    .filter((span) => {
+      try {
+        return span.textContent && range.intersectsNode(span);
+      } catch {
+        return false;
+      }
+    })
+    .map((span) => {
+      const rect = span.getBoundingClientRect();
+      return {
+        text: span.textContent || "",
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
+    })
+    .filter((item) => item.text.trim() || item.text.includes(" "));
+
+  if (spans.length <= 1) return nativeText.replace(/\u00a0/g, " ");
+
+  spans.sort((a, b) => (Math.abs(a.top - b.top) > 3 ? a.top - b.top : a.left - b.left));
+  const avgCharWidth = Math.max(
+    4,
+    spans.reduce((sum, item) => sum + item.width / Math.max(item.text.length, 1), 0) / Math.max(spans.length, 1)
+  );
+  const globalMinLeft = Math.min(...spans.map((item) => item.left));
+  const lineThreshold = Math.max(6, spans.reduce((sum, item) => sum + item.height, 0) / spans.length * 0.55);
+  const lines = [];
+  spans.forEach((item) => {
+    const line = lines.find((entry) => Math.abs(entry.top - item.top) <= lineThreshold);
+    if (line) {
+      line.items.push(item);
+      line.top = Math.min(line.top, item.top);
+    } else {
+      lines.push({ top: item.top, items: [item] });
+    }
+  });
+
+  return lines
+    .sort((a, b) => a.top - b.top)
+    .map((line) => {
+      const ordered = line.items.sort((a, b) => a.left - b.left);
+      let cursor = 0;
+      let output = "";
+      ordered.forEach((item) => {
+        const targetColumn = Math.max(0, Math.round((item.left - globalMinLeft) / avgCharWidth));
+        const spaces = Math.max(0, targetColumn - cursor);
+        output += " ".repeat(spaces) + item.text.replace(/\u00a0/g, " ");
+        cursor = targetColumn + item.text.length;
+      });
+      return output.trimEnd();
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+function getPdfDragRect(start, end, pageElement) {
+  if (!start || !end || !pageElement) return null;
+  const pageRect = pageElement.getBoundingClientRect();
+  const left = Math.max(pageRect.left, Math.min(start.x, end.x));
+  const right = Math.min(pageRect.right, Math.max(start.x, end.x));
+  const top = Math.max(pageRect.top, Math.min(start.y, end.y));
+  const bottom = Math.min(pageRect.bottom, Math.max(start.y, end.y));
+  if (right - left < 12 || bottom - top < 12) return null;
+  return { left, top, right, bottom, width: right - left, height: bottom - top };
+}
+
+function cropPdfCanvasSelection(canvas, pageElement, selectionRect) {
+  if (!canvas || !pageElement || !selectionRect) return "";
+  const pageRect = pageElement.getBoundingClientRect();
+  const scaleX = canvas.width / pageRect.width;
+  const scaleY = canvas.height / pageRect.height;
+  const sourceX = Math.max(0, Math.round((selectionRect.left - pageRect.left) * scaleX));
+  const sourceY = Math.max(0, Math.round((selectionRect.top - pageRect.top) * scaleY));
+  const sourceWidth = Math.min(canvas.width - sourceX, Math.round(selectionRect.width * scaleX));
+  const sourceHeight = Math.min(canvas.height - sourceY, Math.round(selectionRect.height * scaleY));
+  if (sourceWidth < 8 || sourceHeight < 8) return "";
+  const output = document.createElement("canvas");
+  const maxWidth = 1200;
+  const ratio = Math.min(1, maxWidth / sourceWidth);
+  output.width = Math.round(sourceWidth * ratio);
+  output.height = Math.round(sourceHeight * ratio);
+  const context = output.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, output.width, output.height);
+  context.drawImage(canvas, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, output.width, output.height);
+  return output.toDataURL("image/jpeg", 0.86);
 }
 
 function RichTextEditor({ value, onChange, onCreateQuestion }) {
@@ -2600,13 +2722,16 @@ function QACard({ item, subject, setView, onEdit, onDelete, onDominated }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <span className={`rounded px-2 py-1 text-xs font-black uppercase ${tone.badge}`}>{item.status}</span>
-          <h2 className="mt-3 text-2xl font-black text-[#1f5d55]">{item.question}</h2>
+          <h2 className="mt-3 whitespace-pre-wrap text-2xl font-black text-[#1f5d55]">{item.question}</h2>
         </div>
         <div className="flex gap-2">
           <IconButton icon={Pencil} label="Editar" onClick={onEdit} />
           <IconButton icon={Trash2} label="Eliminar" onClick={onDelete} />
         </div>
       </div>
+      {item.sourcePdfSnapshot && (
+        <img src={item.sourcePdfSnapshot} alt="" className="mt-4 max-h-96 w-full rounded-lg border border-slate-900/10 bg-slate-50 object-contain" />
+      )}
       <p className="mt-4 whitespace-pre-wrap text-slate-700">{item.answer}</p>
       {item.sourcePdfName && (
         <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-500">

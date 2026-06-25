@@ -171,6 +171,38 @@ select {
   color: #475569;
 }
 
+.study-document blockquote pre {
+  margin: 0.75rem 0 0;
+  overflow-x: auto;
+  white-space: pre;
+  color: #172033;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.study-document .pdf-selection-note {
+  margin: 1.25rem 0;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.75rem;
+}
+
+.study-document .pdf-selection-note img {
+  display: block;
+  max-width: 100%;
+  border-radius: 6px;
+  background: white;
+}
+
+.study-document .pdf-selection-note figcaption {
+  margin-top: 0.5rem;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .study-document .study-block {
   margin: 1.25rem 0;
   border: 1px solid rgba(15, 23, 42, 0.1);
