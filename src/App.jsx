@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import {
@@ -70,9 +70,9 @@ const priorities = ["baja", "media", "alta"];
 const resourceTypes = ["link", "pdf", "video", "libro", "otro"];
 const SYNC_CODE_KEY = "summer-study-campus-sync-code";
 const subjectSections = [
-  { id: "teoria", label: "Teoría" },
+  { id: "teoria", label: "TeorÃ­a" },
   { id: "seminarios", label: "Seminarios" },
-  { id: "practicas", label: "Prácticas" },
+  { id: "practicas", label: "PrÃ¡cticas" },
   { id: "preguntas", label: "Preguntas" },
 ];
 
@@ -587,13 +587,14 @@ function Dashboard({ data, stats, allThemes, setView, openModal, updateData, que
   return (
     <div className="space-y-6">
       <section className="grid gap-4 lg:grid-cols-[1.45fr_0.55fr]">
-        <div className="overflow-hidden rounded-lg bg-[#172033] text-white shadow-soft">
-          <div className="grid gap-6 p-6 md:grid-cols-[1fr_260px] md:p-8">
+        <div className="relative min-h-[520px] overflow-hidden rounded-lg bg-cover bg-center text-white shadow-soft" style={{ backgroundImage: "url('/appstudios-dashboard.png')" }}>
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-white/5" />
+          <div className="absolute inset-x-0 bottom-0 grid gap-5 bg-slate-950/75 p-5 backdrop-blur-sm md:grid-cols-[1fr_260px] md:p-6">
             <div>
               <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#f4c36b]">Dashboard principal</p>
               <h1 className="mt-3 max-w-2xl text-4xl font-black leading-tight md:text-6xl">AppStudios</h1>
-              <p className="mt-4 max-w-xl text-base text-white/70">
-                Un espacio visual para moverte de asignaturas a temas, trabajar apuntes y mantener visible lo próximo.
+              <p className="mt-4 max-w-xl text-base text-white/80">
+                Organiza tus asignaturas, apunta mejor y avanza paso a paso hasta tu meta.
               </p>
               <div className="mt-6 flex flex-wrap gap-2">
                 <ActionButton icon={Plus} label="Nueva asignatura" onClick={() => openModal({ type: "subject" })} />
@@ -921,7 +922,7 @@ function SubjectPage({ subject, setView, openModal, updateData }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-2xl font-black">Preguntas y respuestas</h2>
-              <p className="mt-1 text-sm text-slate-500">{qaCount} preguntas · {dominatedCount} dominadas</p>
+              <p className="mt-1 text-sm text-slate-500">{qaCount} preguntas Â· {dominatedCount} dominadas</p>
             </div>
             <button onClick={() => setView({ page: "subject-qa", subjectId: subject.id })} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#172033] px-4 text-sm font-black text-white">
               <HelpCircle size={18} /> Abrir preguntas
@@ -936,12 +937,12 @@ function SubjectPage({ subject, setView, openModal, updateData }) {
               <p className="text-sm text-slate-500">Temas de este apartado de la asignatura.</p>
             </div>
             <button onClick={() => openModal({ type: "theme", subjectId: subject.id, section: activeSection })} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#172033] px-4 text-sm font-black text-white">
-              <Plus size={18} /> Añadir aquí
+              <Plus size={18} /> AÃ±adir aquÃ­
             </button>
           </div>
           {sectionThemes.length === 0 ? (
             <section className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center shadow-sm">
-              <p className="font-black text-slate-500">Todavía no hay temas en este apartado.</p>
+              <p className="font-black text-slate-500">TodavÃ­a no hay temas en este apartado.</p>
             </section>
           ) : (
             <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
@@ -1038,11 +1039,11 @@ function ThemePage({ subject, theme, openModal, updateData, setView, syncStatus 
         <RichTextEditor key={theme.id} value={documentHtml} onChange={updateDocument} onCreateQuestion={createQuestionFromSelection} />
         <aside className="space-y-4">
           <ThemeDocumentIndex html={documentHtml} />
-          <ThemeSection title="PDFs e imágenes" icon={Paperclip} onAdd={() => fileInputRef.current?.click()}>
+          <ThemeSection title="PDFs e imÃ¡genes" icon={Paperclip} onAdd={() => fileInputRef.current?.click()}>
             <input ref={fileInputRef} type="file" accept="image/*,.pdf" className="hidden" onChange={addFile} />
             {theme.media.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">
-                Añade PDFs, capturas o imágenes para tenerlos junto a tus apuntes.
+                AÃ±ade PDFs, capturas o imÃ¡genes para tenerlos junto a tus apuntes.
               </div>
             ) : (
               <div className="grid gap-2">
@@ -1055,7 +1056,7 @@ function ThemePage({ subject, theme, openModal, updateData, setView, syncStatus 
           <section className="rounded-lg border border-slate-900/10 bg-white p-4">
             <h2 className="flex items-center gap-2 font-black"><Save size={18} /> Guardado</h2>
             <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-500">{syncStatus}</p>
-            <p className="mt-2 text-sm text-slate-600">El documento se guarda automáticamente en este navegador mientras escribes.</p>
+            <p className="mt-2 text-sm text-slate-600">El documento se guarda automÃ¡ticamente en este navegador mientras escribes.</p>
           </section>
         </aside>
       </div>
@@ -1325,7 +1326,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     insertHtml(`
       <section class="study-code-block study-content-normal" contenteditable="false" data-code-language="${escapeHtml(label)}" data-study-block="true" data-block-size="normal">
         <div class="study-code-header">
-          <span><strong>Codigo</strong> · ${escapeHtml(label)}</span>
+          <span><strong>Codigo</strong> Â· ${escapeHtml(label)}</span>
           <span class="study-code-actions">
             <button type="button" data-code-action="copy" contenteditable="false">Copiar</button>
             <button type="button" data-code-action="edit" contenteditable="false">Editar</button>
@@ -1786,8 +1787,8 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   return (
     <section className={`${fullscreen ? "fixed inset-0 z-50 overflow-auto rounded-none" : "overflow-hidden rounded-lg"} border border-slate-900/10 bg-white shadow-soft`}>
       <div className={`${fullscreen ? "fixed left-0 right-0 top-0" : "fixed left-0 right-0 top-[68px] xl:left-72"} z-40 flex flex-wrap items-center gap-2 border-b border-slate-900/10 bg-slate-50/95 px-3 py-3 shadow-sm backdrop-blur md:px-8`}>
-        <EditorTool icon={Heading1} label="Título" onClick={() => toggleFormatBlock("h1")} />
-        <EditorTool icon={Heading2} label="Subtítulo 1" onClick={() => toggleFormatBlock("h2")} />
+        <EditorTool icon={Heading1} label="TÃ­tulo" onClick={() => toggleFormatBlock("h1")} />
+        <EditorTool icon={Heading2} label="SubtÃ­tulo 1" onClick={() => toggleFormatBlock("h2")} />
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => toggleFormatBlock("h3")} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">S2</button>
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => toggleFormatBlock("h4")} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">S3</button>
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => changeSelectionFontSize(-2)} className="h-9 rounded-lg bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100">A-</button>
@@ -1862,7 +1863,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
             <span className="h-3 w-3 rounded-full bg-[#2f6f73] shadow-sm" />
             <span className="h-1 flex-1 rounded-full bg-[#2f6f73] shadow-sm" />
             <span className="rounded-full bg-[#172033] px-2 py-1 text-[11px] font-black uppercase text-white">
-              {imageDropIndicator.position === "before" ? "Encima" : "Debajo"} · {imageDropIndicator.align === "left" ? "Izquierda" : imageDropIndicator.align === "right" ? "Derecha" : "Centro"}
+              {imageDropIndicator.position === "before" ? "Encima" : "Debajo"} Â· {imageDropIndicator.align === "left" ? "Izquierda" : imageDropIndicator.align === "right" ? "Derecha" : "Centro"}
             </span>
           </div>
         )}
@@ -1894,7 +1895,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
             style={{ left: blockTools.left, top: blockTools.top, maxWidth: "calc(100% - 24px)" }}
           >
             <span className="text-xs font-black uppercase text-slate-500">Bloque</span>
-            <button type="button" onClick={() => resizeSelectedBlock("small")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">Pequeño</button>
+            <button type="button" onClick={() => resizeSelectedBlock("small")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">PequeÃ±o</button>
             <button type="button" onClick={() => resizeSelectedBlock("normal")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">Normal</button>
             <button type="button" onClick={() => resizeSelectedBlock("large")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">Grande</button>
             <EditorTool icon={Trash2} label="Eliminar bloque" onClick={deleteSelectedBlock} />
@@ -1992,7 +1993,7 @@ function SubjectQAPage({ subject, openModal, updateData, setView }) {
           <div>
             <p className="font-black uppercase tracking-[0.18em] text-slate-400">{subject.name}</p>
             <h1 className="mt-2 text-4xl font-black">Preguntas y respuestas</h1>
-            <p className="mt-2 text-slate-600">Banco de preguntas de teoría de la asignatura.</p>
+            <p className="mt-2 text-slate-600">Banco de preguntas de teorÃ­a de la asignatura.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => exportSubjectQuestionsToPdf(subject)} className="inline-flex h-11 items-center gap-2 rounded-lg bg-white px-4 text-sm font-black text-[#172033] ring-1 ring-slate-900/10 hover:bg-slate-50">
@@ -2002,7 +2003,7 @@ function SubjectQAPage({ subject, openModal, updateData, setView }) {
               <HelpCircle size={18} /> Modo repaso
             </button>
             <button onClick={() => openModal({ type: "qa", subjectId: subject.id })} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#172033] px-4 text-sm font-black text-white">
-              <Plus size={18} /> Añadir pregunta
+              <Plus size={18} /> AÃ±adir pregunta
             </button>
           </div>
         </div>
@@ -2020,7 +2021,7 @@ function SubjectQAPage({ subject, openModal, updateData, setView }) {
       {reviewMode ? (
         <section className="mx-auto max-w-3xl rounded-lg border border-slate-900/10 bg-white p-8 text-center shadow-soft">
           {!reviewQuestion ? (
-            <p className="font-bold text-slate-500">Aún no hay preguntas para repasar.</p>
+            <p className="font-bold text-slate-500">AÃºn no hay preguntas para repasar.</p>
           ) : (
             <>
               <Badge tone={reviewQuestion.status === "dominada" ? "cool" : "soft"}>{reviewQuestion.status}</Badge>
@@ -2029,9 +2030,9 @@ function SubjectQAPage({ subject, openModal, updateData, setView }) {
                 <>
                   <p className="mt-6 rounded-lg bg-slate-50 p-5 text-left text-lg text-slate-700">{reviewQuestion.answer}</p>
                   <div className="mt-6 grid gap-2 md:grid-cols-3">
-                    <button onClick={() => answerReview("pendiente")} className="rounded-lg bg-slate-100 px-4 py-3 font-black">No me la sé</button>
-                    <button onClick={() => answerReview("repasando")} className="rounded-lg bg-yellow-100 px-4 py-3 font-black text-yellow-800">Más o menos</button>
-                    <button onClick={() => answerReview("dominada")} className="rounded-lg bg-green-100 px-4 py-3 font-black text-green-700">Me la sé</button>
+                    <button onClick={() => answerReview("pendiente")} className="rounded-lg bg-slate-100 px-4 py-3 font-black">No me la sÃ©</button>
+                    <button onClick={() => answerReview("repasando")} className="rounded-lg bg-yellow-100 px-4 py-3 font-black text-yellow-800">MÃ¡s o menos</button>
+                    <button onClick={() => answerReview("dominada")} className="rounded-lg bg-green-100 px-4 py-3 font-black text-green-700">Me la sÃ©</button>
                   </div>
                 </>
               ) : (
@@ -2161,7 +2162,7 @@ function CalendarPage({ data, openModal, updateData }) {
                       }}
                       className="block rounded bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700"
                     >
-                      {event.start ? `${event.start} · ` : ""}{event.title}
+                      {event.start ? `${event.start} Â· ` : ""}{event.title}
                     </span>
                   ))}
                 </div>
@@ -2183,7 +2184,7 @@ function CalendarPage({ data, openModal, updateData }) {
               key={index}
               type="button"
               disabled={!day}
-              aria-label={day ? `Crear evento el ${date}` : "Día vacío"}
+              aria-label={day ? `Crear evento el ${date}` : "DÃ­a vacÃ­o"}
               onClick={() => day && openModal({ type: "event", date })}
               className={`min-h-32 rounded-lg border border-slate-900/10 bg-white p-2 text-left transition hover:-translate-y-0.5 hover:shadow-soft ${!day ? "opacity-0" : ""}`}
             >
@@ -2198,7 +2199,7 @@ function CalendarPage({ data, openModal, updateData }) {
                     }}
                     className="block w-full rounded bg-[#dcebdc] px-2 py-1 text-xs font-bold text-[#1f5d55]"
                   >
-                    {event.start ? `${event.start} · ` : ""}{event.title}
+                    {event.start ? `${event.start} Â· ` : ""}{event.title}
                   </span>
                 ))}
               </div>
@@ -2233,7 +2234,7 @@ function TasksPage({ data, openModal, updateData }) {
 function ResourcesPage({ data, openModal, updateData }) {
   return (
     <div className="space-y-5">
-      <PageTitle title="Recursos generales" subtitle="Enlaces, PDFs, vídeos y materiales transversales." action={() => openModal({ type: "resource" })} />
+      <PageTitle title="Recursos generales" subtitle="Enlaces, PDFs, vÃ­deos y materiales transversales." action={() => openModal({ type: "resource" })} />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {data.resources.map((resource) => (
           <ResourceCard key={resource.id} resource={resource} openModal={openModal} updateData={updateData} />
@@ -2291,7 +2292,7 @@ function FormFields({ modal, form, set, data }) {
   return (
     <div className="grid gap-3">
       {["subject", "theme", "task", "resource", "event", "schedule", "theme-note", "theme-section", "exercise", "doubt", "check", "theme-resource", "quick-note"].includes(modal.type) && (
-        <Field label={["doubt"].includes(modal.type) ? "Duda" : modal.type === "check" ? "Elemento" : "Título / nombre"}>
+        <Field label={["doubt"].includes(modal.type) ? "Duda" : modal.type === "check" ? "Elemento" : "TÃ­tulo / nombre"}>
           <input value={form.title || form.name || form.question || form.label || ""} onChange={(event) => set(mainKey(modal.type), event.target.value)} className="input" required />
         </Field>
       )}
@@ -2304,7 +2305,7 @@ function FormFields({ modal, form, set, data }) {
       )}
       {modal.type === "subject" && (
         <>
-          <Field label="Descripción"><textarea value={form.description} onChange={(e) => set("description", e.target.value)} className="input min-h-24" /></Field>
+          <Field label="DescripciÃ³n"><textarea value={form.description} onChange={(e) => set("description", e.target.value)} className="input min-h-24" /></Field>
           <div className="grid gap-3 md:grid-cols-3">
             <Field label="Color"><input type="color" value={form.color} onChange={(e) => set("color", e.target.value)} className="h-11 w-full rounded-lg border" /></Field>
             <Field label="Icono">
@@ -2317,7 +2318,7 @@ function FormFields({ modal, form, set, data }) {
       )}
       {modal.type === "theme" && (
         <>
-          <Field label="Descripción"><textarea value={form.description} onChange={(e) => set("description", e.target.value)} className="input min-h-24" /></Field>
+          <Field label="DescripciÃ³n"><textarea value={form.description} onChange={(e) => set("description", e.target.value)} className="input min-h-24" /></Field>
           <div className="grid gap-3 md:grid-cols-[1fr_auto]">
             <Field label="Foto de portada">
               <input value={form.coverImage || ""} onChange={(e) => set("coverImage", e.target.value)} className="input" placeholder="Pega una URL de imagen o sube una foto" />
@@ -2378,12 +2379,12 @@ function FormFields({ modal, form, set, data }) {
             <Field label="Fin"><input type="time" value={form.end || ""} onChange={(e) => set("end", e.target.value)} className="input" /></Field>
             <Field label="Asignatura"><Select value={form.subjectId || ""} onChange={(v) => set("subjectId", v)} options={["", ...subjects.map((s) => s.id)]} labels={{ "": "Sin asignatura", ...Object.fromEntries(subjects.map((s) => [s.id, s.name])) }} /></Field>
           </div>
-          <Field label="Texto / descripción"><textarea value={form.description || ""} onChange={(e) => set("description", e.target.value)} className="input min-h-28" /></Field>
+          <Field label="Texto / descripciÃ³n"><textarea value={form.description || ""} onChange={(e) => set("description", e.target.value)} className="input min-h-28" /></Field>
         </>
       )}
       {modal.type === "schedule" && (
         <div className="grid gap-3 md:grid-cols-4">
-          <Field label="Día"><Select value={form.day} onChange={(v) => set("day", v)} options={days} /></Field>
+          <Field label="DÃ­a"><Select value={form.day} onChange={(v) => set("day", v)} options={days} /></Field>
           <Field label="Inicio"><input type="time" value={form.start} onChange={(e) => set("start", e.target.value)} className="input" /></Field>
           <Field label="Fin"><input type="time" value={form.end} onChange={(e) => set("end", e.target.value)} className="input" /></Field>
           <Field label="Asignatura"><Select value={form.subjectId || ""} onChange={(v) => set("subjectId", v)} options={["", ...subjects.map((s) => s.id)]} labels={{ "": "Libre", ...Object.fromEntries(subjects.map((s) => [s.id, s.name])) }} /></Field>
@@ -2552,7 +2553,7 @@ function SubjectCard({ subject, setView, openModal, updateData, large = false })
         <ColorIcon subject={subject} />
         <div className="flex gap-1">
           <IconButton icon={Pencil} label="Editar" onClick={() => openModal({ type: "subject", item: subject })} />
-          <IconButton icon={Plus} label="Añadir tema" onClick={() => openModal({ type: "theme", subjectId: subject.id })} />
+          <IconButton icon={Plus} label="AÃ±adir tema" onClick={() => openModal({ type: "theme", subjectId: subject.id })} />
         </div>
       </div>
       <h3 className="mt-4 text-xl font-black">{subject.name}</h3>
@@ -2633,7 +2634,7 @@ function PomodoroCard({ full = false }) {
     <div className={`rounded-lg border border-slate-900/10 bg-white p-5 shadow-soft ${full ? "text-center" : ""}`}>
       <div className="flex items-center gap-3">
         <span className="grid h-12 w-12 place-items-center rounded-lg bg-[#f4c36b]"><AlarmClock /></span>
-        <div><h2 className="font-black">Pomodoro</h2><p className="text-sm text-slate-500">Sesión enfocada</p></div>
+        <div><h2 className="font-black">Pomodoro</h2><p className="text-sm text-slate-500">SesiÃ³n enfocada</p></div>
       </div>
       <div className="my-6 text-center text-6xl font-black tabular-nums">{mins}:{secs}</div>
       <div className="grid grid-cols-3 gap-2">
@@ -2663,7 +2664,7 @@ function TaskList({ tasks, data, updateData, openModal }) {
             />
             <div className="min-w-0 flex-1">
               <p className={`truncate text-sm font-black ${task.done ? "text-slate-400 line-through" : ""}`}>{task.title}</p>
-              <p className="text-xs text-slate-500">{subject?.name || "General"} · {task.dueDate}</p>
+              <p className="text-xs text-slate-500">{subject?.name || "General"} Â· {task.dueDate}</p>
             </div>
             <IconButton icon={Pencil} label="Editar" onClick={() => openModal({ type: "task", item: task })} />
           </div>
@@ -2697,7 +2698,7 @@ function ScheduleGrid({ blocks, subjects, openModal }) {
 
 function MiniCalendar({ events, subjects }) {
   if (!events.length) return <div className="rounded-lg bg-slate-50 p-4 text-sm font-bold text-slate-500">No hay eventos en el calendario.</div>;
-  return <div className="space-y-2">{events.map((event) => <div key={event.id} className="rounded-lg bg-slate-50 p-3 text-sm font-bold">{event.date} · {event.title}</div>)}</div>;
+  return <div className="space-y-2">{events.map((event) => <div key={event.id} className="rounded-lg bg-slate-50 p-3 text-sm font-bold">{event.date} Â· {event.title}</div>)}</div>;
 }
 
 function ScheduleMini({ blocks, subjects }) {
@@ -2743,7 +2744,7 @@ function ThemeSection({ title, icon: Icon, onAdd, children }) {
     <section className="rounded-lg border border-slate-900/10 bg-white p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 font-black"><Icon size={18} /> {title}</h2>
-        <IconButton icon={Plus} label="Añadir" onClick={onAdd} />
+        <IconButton icon={Plus} label="AÃ±adir" onClick={onAdd} />
       </div>
       {children}
     </section>
@@ -2994,11 +2995,11 @@ function fileToDataUrl(file) {
 }
 
 function emptyThemeDocument(title = "Apuntes") {
-  return `<div class="auto-toc" contenteditable="false"><h2>Índice</h2><p class="toc-empty">Añade títulos y subtítulos para crear el índice.</p></div><h1>${escapeHtml(title)}</h1><p>Empieza a escribir tus apuntes aquí...</p>`;
+  return `<div class="auto-toc" contenteditable="false"><h2>Ãndice</h2><p class="toc-empty">AÃ±ade tÃ­tulos y subtÃ­tulos para crear el Ã­ndice.</p></div><h1>${escapeHtml(title)}</h1><p>Empieza a escribir tus apuntes aquÃ­...</p>`;
 }
 
 function buildThemeDocument(theme) {
-  const blocks = [`<div class="auto-toc" contenteditable="false"><h2>Índice</h2><p class="toc-empty">Añade títulos y subtítulos para crear el índice.</p></div><h1>${escapeHtml(theme.name)}</h1>`];
+  const blocks = [`<div class="auto-toc" contenteditable="false"><h2>Ãndice</h2><p class="toc-empty">AÃ±ade tÃ­tulos y subtÃ­tulos para crear el Ã­ndice.</p></div><h1>${escapeHtml(theme.name)}</h1>`];
   if (theme.description) blocks.push(`<p>${escapeHtml(theme.description)}</p>`);
   if (theme.notes?.length) {
     blocks.push("<h2>Apuntes</h2>");
@@ -3034,11 +3035,11 @@ function updateDocumentToc(editor) {
   const items = headings
     .map((heading) => {
       const level = Number(heading.tagName.slice(1));
-      const text = escapeHtml(heading.textContent.trim() || "Sin título");
+      const text = escapeHtml(heading.textContent.trim() || "Sin tÃ­tulo");
       return `<div class="toc-row toc-level-${level}"><a href="#${heading.id}">${text}</a><button type="button" data-toc-delete="${heading.id}" contenteditable="false" title="Borrar esta seccion">Borrar</button></div>`;
     })
     .join("");
-  toc.innerHTML = `<h2>Índice</h2>${items || '<p class="toc-empty">Añade títulos y subtítulos para crear el índice.</p>'}`;
+  toc.innerHTML = `<h2>Ãndice</h2>${items || '<p class="toc-empty">AÃ±ade tÃ­tulos y subtÃ­tulos para crear el Ã­ndice.</p>'}`;
 }
 
 function ensureEditableParagraph(editor) {
