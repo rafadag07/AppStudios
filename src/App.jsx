@@ -588,8 +588,8 @@ function Dashboard({ data, stats, allThemes, setView, openModal, updateData, que
     <div className="space-y-6">
       <section className="relative min-h-[500px] overflow-hidden rounded-lg bg-cover bg-[center_45%] shadow-soft" style={{ backgroundImage: "url('/appstudios-dashboard.png')" }}>
         <div className="absolute inset-0 bg-gradient-to-r from-sky-950/10 via-transparent to-transparent" />
-        <div className="relative grid min-h-[500px] content-center gap-5 p-5 md:p-7 xl:grid-cols-[0.92fr_0.78fr]">
-          <div className="max-w-2xl rounded-lg border border-white/45 bg-sky-950/12 p-5 text-white shadow-soft backdrop-blur-[5px] md:p-7">
+        <div className="relative flex min-h-[500px] items-center p-5 md:p-8">
+          <div className="w-full max-w-xl rounded-lg border border-white/35 bg-sky-950/10 p-5 text-white shadow-soft backdrop-blur-[3px] md:p-7">
             <p className="text-sm font-bold uppercase tracking-[0.22em] text-[#1f5d55]">Dashboard principal</p>
             <h1 className="mt-3 max-w-2xl text-4xl font-black leading-tight drop-shadow md:text-6xl">AppStudios</h1>
             <div className="mt-5 h-1 w-16 rounded-full bg-emerald-300" />
@@ -601,12 +601,6 @@ function Dashboard({ data, stats, allThemes, setView, openModal, updateData, que
               <DashboardAction icon={ListChecks} label="Nueva tarea" tone="blue" onClick={() => openModal({ type: "task" })} />
               <DashboardAction icon={Paperclip} label="Nuevo recurso" tone="purple" onClick={() => openModal({ type: "resource" })} />
             </div>
-          </div>
-          <div className="grid content-center gap-3 sm:grid-cols-2">
-            <DashboardStat icon={ListChecks} label="Tareas pendientes" value={stats.pendingTasks} accent="bg-blue-500" iconClass="bg-blue-50 text-blue-600" />
-            <DashboardStat icon={BookOpen} label="Temas completados" value={`${stats.completedThemes}/${stats.totalThemes}`} accent="bg-emerald-500" iconClass="bg-emerald-50 text-emerald-600" />
-            <DashboardStat icon={Network} label="Asignaturas" value={data.subjects.length} accent="bg-amber-500" iconClass="bg-amber-50 text-amber-600" />
-            <DashboardStat icon={LinkIcon} label="Recursos" value={data.resources.length} accent="bg-violet-500" iconClass="bg-violet-50 text-violet-600" />
           </div>
         </div>
       </section>
@@ -2874,19 +2868,6 @@ function DashboardAction({ icon: Icon, label, tone, onClick }) {
     <button onClick={onClick} className={`inline-flex h-14 items-center justify-center gap-2 rounded-lg bg-white/72 px-3 text-sm font-black shadow-sm ring-1 backdrop-blur-[3px] transition ${toneClass}`}>
       <Icon size={21} /> {label}
     </button>
-  );
-}
-
-function DashboardStat({ icon: Icon, label, value, accent, iconClass }) {
-  return (
-    <article className="min-h-36 rounded-lg border border-white/45 bg-white/24 p-4 text-[#10213d] shadow-soft backdrop-blur-[5px]">
-      <span className={`grid h-11 w-11 place-items-center rounded-full shadow-sm ${iconClass}`}>
-        <Icon size={22} />
-      </span>
-      <p className="mt-4 text-sm font-black text-slate-700">{label}</p>
-      <span className={`mt-3 block h-1 w-7 rounded-full ${accent}`} />
-      <p className="mt-3 text-3xl font-black">{value}</p>
-    </article>
   );
 }
 
