@@ -137,6 +137,163 @@ function migrateSubjectQuestions(data) {
   });
 }
 
+function useGlobalPomodoro(data) {
+  const [selectedSubjectId, setSelectedSubjectId] = useState(data.subjects[0]?.id || "");
+  const [mode, setMode] = useState("study");
+  const [durations, setDurations] = useState({ study: 25, short: 5, long: 15 });
+  const [seconds, setSeconds] = useState(25 * 60);
+  const [running, setRunning] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [completionPrompt, setCompletionPrompt] = useState(null);
+  const [history, setHistory] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(POMODORO_HISTORY_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const selectedSubject = data.subjects.find((subject) => subject.id === selectedSubjectId) || data.subjects[0];
+  const modeLabels = { study: "Estudio", short: "Descanso corto", long: "Descanso largo" };
+
+  useEffect(() => {
+    if (!selectedSubjectId && data.subjects[0]) setSelectedSubjectId(data.subjects[0].id);
+  }, [data.subjects, selectedSubjectId]);
+
+  useEffect(() => {
+    localStorage.setItem(POMODORO_HISTORY_KEY, JSON.stringify(history));
+  }, [history]);
+
+  const notifyPomodoro = (title, body) => {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "granted") {
+      new Notification(title, { body });
+    }
+  };
+
+  const requestNotificationPermission = () => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  };
+
+  const saveSession = (fullDuration = false) => {
+    const duration = fullDuration ? durations[mode] : Math.max(1, durations[mode] - Math.ceil(seconds / 60));
+    const session = {
+      id: createId("pomodoro"),
+      mode,
+      modeLabel: modeLabels[mode],
+      subjectId: selectedSubject?.id || null,
+      subjectName: selectedSubject?.name || "Sin asignatura",
+      duration,
+      notes: notes.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    setHistory((current) => [session, ...current].slice(0, 150));
+  };
+
+  const start = () => {
+    requestNotificationPermission();
+    setCompletionPrompt(null);
+    setRunning(true);
+  };
+
+  const pause = () => setRunning(false);
+
+  const reset = () => {
+    setRunning(false);
+    setSeconds(durations[mode] * 60);
+  };
+
+  const finish = () => {
+    setRunning(false);
+    if (seconds > 0 && seconds < durations[mode] * 60) saveSession(false);
+    setSeconds(durations[mode] * 60);
+    setCompletionPrompt(null);
+  };
+
+  const changeMode = (nextMode, autoStart = false) => {
+    setMode(nextMode);
+    setSeconds(durations[nextMode] * 60);
+    setRunning(autoStart);
+    setCompletionPrompt(null);
+  };
+
+  const startBreak = (breakMode) => changeMode(breakMode, true);
+
+  const updateDuration = (key, delta) => {
+    setDurations((current) => {
+      const nextValue = Math.max(1, Math.min(90, current[key] + delta));
+      const next = { ...current, [key]: nextValue };
+      if (key === mode) setSeconds(nextValue * 60);
+      return next;
+    });
+    setRunning(false);
+  };
+
+  const resetDurations = () => {
+    setDurations({ study: 25, short: 5, long: 15 });
+    setMode("study");
+    setSeconds(25 * 60);
+    setRunning(false);
+    setCompletionPrompt(null);
+  };
+
+  const deleteSession = (sessionId) => setHistory((current) => current.filter((session) => session.id !== sessionId));
+
+  const clearHistory = () => {
+    if (!window.confirm("Borrar todo el historial de pomodoros?")) return;
+    setHistory([]);
+  };
+
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = window.setInterval(() => {
+      setSeconds((value) => {
+        if (value > 1) return value - 1;
+        window.clearInterval(timer);
+        setRunning(false);
+        if (mode === "study") {
+          saveSession(true);
+          setCompletionPrompt("study-complete");
+          notifyPomodoro("Pomodoro terminado", "Elige descanso corto o descanso largo.");
+          return 0;
+        }
+        saveSession(true);
+        notifyPomodoro("Descanso terminado", "Empieza otra sesion de estudio.");
+        setMode("study");
+        setRunning(true);
+        return durations.study * 60;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [running, mode, durations, selectedSubjectId, notes, seconds]);
+
+  return {
+    selectedSubjectId,
+    setSelectedSubjectId,
+    selectedSubject,
+    mode,
+    durations,
+    seconds,
+    running,
+    notes,
+    setNotes,
+    history,
+    completionPrompt,
+    setCompletionPrompt,
+    start,
+    pause,
+    reset,
+    finish,
+    changeMode,
+    startBreak,
+    updateDuration,
+    resetDurations,
+    deleteSession,
+    clearHistory,
+  };
+}
+
 function App() {
   const [data, setData] = useState(readStoredData);
   const [view, setView] = useState({ page: "dashboard" });
@@ -147,6 +304,7 @@ function App() {
   const latestDataRef = useRef(data);
   const lastCloudJsonRef = useRef("");
   const skipCloudSaveRef = useRef(false);
+  const pomodoro = useGlobalPomodoro(data);
 
   const applyRemoteData = (remoteData, status = "Sincronizado") => {
     migrateSubjectQuestions(remoteData);
@@ -339,9 +497,11 @@ function App() {
         {view.page === "schedule" && <SchedulePage data={data} openModal={setModal} updateData={updateData} />}
         {view.page === "tasks" && <TasksPage data={data} openModal={setModal} updateData={updateData} />}
         {view.page === "resources" && <ResourcesPage data={data} openModal={setModal} updateData={updateData} />}
-        {view.page === "pomodoro" && <PomodoroPage data={data} />}
+        {view.page === "pomodoro" && <PomodoroPage data={data} pomodoro={pomodoro} />}
       </Shell>
 
+      <FloatingPomodoro pomodoro={pomodoro} setView={setView} />
+      {pomodoro.completionPrompt === "study-complete" && <PomodoroBreakPrompt pomodoro={pomodoro} />}
       {modal && <EditorModal modal={modal} close={() => setModal(null)} data={data} updateData={updateData} />}
     </div>
   );
@@ -2244,84 +2404,34 @@ function ResourcesPage({ data, openModal, updateData }) {
   );
 }
 
-function PomodoroPage({ data }) {
-  const [selectedSubjectId, setSelectedSubjectId] = useState(data.subjects[0]?.id || "");
-  const [mode, setMode] = useState("study");
-  const [durations, setDurations] = useState({ study: 25, short: 5, long: 15 });
-  const [seconds, setSeconds] = useState(durations.study * 60);
-  const [running, setRunning] = useState(false);
-  const [notes, setNotes] = useState("");
+function PomodoroPage({ data, pomodoro }) {
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [history, setHistory] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(POMODORO_HISTORY_KEY) || "[]");
-    } catch {
-      return [];
-    }
-  });
-  const selectedSubject = data.subjects.find((subject) => subject.id === selectedSubjectId);
+  const {
+    selectedSubjectId,
+    setSelectedSubjectId,
+    selectedSubject,
+    mode,
+    durations,
+    seconds,
+    running,
+    notes,
+    setNotes,
+    history,
+    start,
+    pause,
+    reset,
+    finish,
+    changeMode,
+    updateDuration,
+    resetDurations,
+    deleteSession,
+    clearHistory,
+  } = pomodoro;
   const modeMeta = {
     study: { label: "Estudio", icon: BookOpen },
     short: { label: "Descanso corto", icon: Clock3 },
     long: { label: "Descanso largo", icon: AlarmClock },
   };
-  const changeMode = (nextMode) => {
-    setMode(nextMode);
-    setRunning(false);
-    setSeconds(durations[nextMode] * 60);
-  };
-  const updateDuration = (key, delta) => {
-    setDurations((current) => {
-      const nextValue = Math.max(1, Math.min(90, current[key] + delta));
-      const next = { ...current, [key]: nextValue };
-      if (key === mode) setSeconds(nextValue * 60);
-      return next;
-    });
-    setRunning(false);
-  };
-  useEffect(() => {
-    localStorage.setItem(POMODORO_HISTORY_KEY, JSON.stringify(history));
-  }, [history]);
-  const savePomodoroSession = (fullDuration = false) => {
-    const duration = fullDuration ? durations[mode] : Math.max(1, durations[mode] - Math.ceil(seconds / 60));
-    const session = {
-      id: createId("pomodoro"),
-      mode,
-      modeLabel: modeMeta[mode].label,
-      subjectId: selectedSubject?.id || null,
-      subjectName: selectedSubject?.name || "Sin asignatura",
-      duration,
-      notes: notes.trim(),
-      createdAt: new Date().toISOString(),
-    };
-    setHistory((current) => [session, ...current].slice(0, 150));
-  };
-  const finishSession = () => {
-    setRunning(false);
-    savePomodoroSession(false);
-    setSeconds(durations[mode] * 60);
-  };
-  const deletePomodoroSession = (sessionId) => {
-    setHistory((current) => current.filter((session) => session.id !== sessionId));
-  };
-  const clearPomodoroHistory = () => {
-    if (!window.confirm("Borrar todo el historial de pomodoros?")) return;
-    setHistory([]);
-  };
-  useEffect(() => {
-    if (!running) return undefined;
-    const timer = setInterval(() => {
-      setSeconds((value) => {
-        if (value <= 1) {
-          setRunning(false);
-          savePomodoroSession(true);
-          return 0;
-        }
-        return value - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [running, mode, selectedSubjectId, notes, durations, seconds]);
   const mins = String(Math.floor(seconds / 60)).padStart(2, "0");
   const secs = String(seconds % 60).padStart(2, "0");
   const todayKey = todayIso();
@@ -2375,7 +2485,7 @@ function PomodoroPage({ data }) {
                 <Clock3 size={18} /> Historial
               </button>
               {history.length > 0 && (
-                <button type="button" onClick={clearPomodoroHistory} className="text-xs font-black text-red-500 hover:text-red-700">
+                <button type="button" onClick={clearHistory} className="text-xs font-black text-red-500 hover:text-red-700">
                   Borrar todo
                 </button>
               )}
@@ -2393,7 +2503,7 @@ function PomodoroPage({ data }) {
                       <p className="text-xs font-semibold text-slate-400">{new Date(session.createdAt).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
                       {session.notes && <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-500">{session.notes}</p>}
                     </div>
-                    <button type="button" onClick={() => deletePomodoroSession(session.id)} title="Borrar sesion" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white text-red-500 shadow-sm hover:bg-red-50">
+                    <button type="button" onClick={() => deleteSession(session.id)} title="Borrar sesion" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white text-red-500 shadow-sm hover:bg-red-50">
                       <Trash2 size={15} />
                     </button>
                   </div>
@@ -2424,16 +2534,16 @@ function PomodoroPage({ data }) {
               "La concentracion es la raiz de todas las capacidades del ser humano."
             </div>
             <div className="mt-8 grid gap-3 sm:grid-cols-4">
-              <button onClick={() => setRunning(true)} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#172033] text-sm font-black text-white"><Play size={18} /> Iniciar</button>
-              <button onClick={() => setRunning(false)} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-slate-100 text-sm font-black text-slate-700"><Pause size={18} /> Pausar</button>
-              <button onClick={() => { setRunning(false); setSeconds(durations[mode] * 60); }} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-slate-100 text-sm font-black text-slate-700"><RotateCcw size={18} /> Reiniciar</button>
-              <button onClick={finishSession} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 text-sm font-black text-red-600"><Square size={16} /> Finalizar</button>
+              <button onClick={start} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#172033] text-sm font-black text-white"><Play size={18} /> Iniciar</button>
+              <button onClick={pause} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-slate-100 text-sm font-black text-slate-700"><Pause size={18} /> Pausar</button>
+              <button onClick={reset} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-slate-100 text-sm font-black text-slate-700"><RotateCcw size={18} /> Reiniciar</button>
+              <button onClick={finish} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 text-sm font-black text-red-600"><Square size={16} /> Finalizar</button>
             </div>
           </section>
           <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between">
               <h2 className="font-black">Configuracion de tiempos</h2>
-              <button onClick={() => { setDurations({ study: 25, short: 5, long: 15 }); setSeconds(25 * 60); setMode("study"); setRunning(false); }} className="text-sm font-black text-slate-400">Restablecer</button>
+              <button onClick={resetDurations} className="text-sm font-black text-slate-400">Restablecer</button>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               <DurationControl label="Estudio" value={durations.study} onMinus={() => updateDuration("study", -1)} onPlus={() => updateDuration("study", 1)} />
@@ -2458,10 +2568,111 @@ function PomodoroPage({ data }) {
           history={history}
           stats={monthlyStats}
           onClose={() => setHistoryOpen(false)}
-          onDelete={deletePomodoroSession}
-          onClear={clearPomodoroHistory}
+          onDelete={deleteSession}
+          onClear={clearHistory}
         />
       )}
+    </div>
+  );
+}
+
+function FloatingPomodoro({ pomodoro, setView }) {
+  const fullSeconds = pomodoro.durations[pomodoro.mode] * 60;
+  const isActive = pomodoro.running || pomodoro.completionPrompt || pomodoro.seconds !== fullSeconds;
+  if (!isActive) return null;
+  const mins = String(Math.floor(pomodoro.seconds / 60)).padStart(2, "0");
+  const secs = String(pomodoro.seconds % 60).padStart(2, "0");
+  const modeLabel = pomodoro.mode === "study" ? "Estudio" : pomodoro.mode === "short" ? "Descanso corto" : "Descanso largo";
+
+  return (
+    <aside className="fixed bottom-24 right-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-white/70 bg-white/95 p-4 shadow-2xl backdrop-blur md:bottom-5">
+      <div className="flex items-start gap-3">
+        <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg ${pomodoro.mode === "study" ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600"}`}>
+          {pomodoro.mode === "study" ? <Target size={22} /> : <Clock3 size={22} />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-black text-[#172033]">{pomodoro.running ? "Pomodoro activo" : "Pomodoro pausado"}</p>
+            <p className="text-xl font-black tabular-nums text-[#10182b]">{mins}:{secs}</p>
+          </div>
+          <p className="mt-1 truncate text-xs font-bold text-slate-500">{modeLabel} - {pomodoro.selectedSubject?.name || "Sin asignatura"}</p>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={pomodoro.running ? pomodoro.pause : pomodoro.start}
+              className="inline-flex h-9 items-center justify-center gap-1 rounded-lg bg-[#172033] px-2 text-xs font-black text-white"
+            >
+              {pomodoro.running ? <Pause size={14} /> : <Play size={14} />} {pomodoro.running ? "Pausar" : "Seguir"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setView({ page: "pomodoro" })}
+              className="h-9 rounded-lg bg-slate-100 px-2 text-xs font-black text-slate-700"
+            >
+              Abrir
+            </button>
+            <button
+              type="button"
+              onClick={pomodoro.finish}
+              className="h-9 rounded-lg border border-red-200 bg-red-50 px-2 text-xs font-black text-red-600"
+            >
+              Finalizar
+            </button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function PomodoroBreakPrompt({ pomodoro }) {
+  const subjectName = pomodoro.selectedSubject?.name || "Sin asignatura";
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+      <section className="w-full max-w-lg rounded-lg bg-white p-5 shadow-2xl md:p-6">
+        <div className="flex items-start gap-4">
+          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-600">
+            <AlarmClock size={28} />
+          </span>
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">Pomodoro terminado</p>
+            <h2 className="mt-1 text-2xl font-black text-[#10182b]">Buen bloque de estudio</h2>
+            <p className="mt-2 text-sm font-semibold text-slate-500">
+              Has terminado una sesion de {subjectName}. Elige un descanso y al acabar se iniciara otro pomodoro automaticamente.
+            </p>
+          </div>
+        </div>
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => pomodoro.startBreak("short")}
+            className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-left font-black text-emerald-700 hover:bg-emerald-100"
+          >
+            <span className="block text-sm uppercase tracking-[0.12em] text-emerald-500">Descanso corto</span>
+            {pomodoro.durations.short} minutos
+          </button>
+          <button
+            type="button"
+            onClick={() => pomodoro.startBreak("long")}
+            className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-left font-black text-amber-700 hover:bg-amber-100"
+          >
+            <span className="block text-sm uppercase tracking-[0.12em] text-amber-500">Descanso largo</span>
+            {pomodoro.durations.long} minutos
+          </button>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              pomodoro.setCompletionPrompt(null);
+              pomodoro.reset();
+            }}
+            className="rounded-lg bg-slate-100 px-4 py-3 text-sm font-black text-slate-600 hover:bg-slate-200"
+          >
+            Parar ciclo
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
