@@ -344,7 +344,7 @@ function App() {
 function Shell({ children, view, setView, subjects, query, setQuery, openModal, cloudUser, syncStatus, onCloudSignIn, onCodeSignIn, onCloudSignOut }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const nav = [
-    ["dashboard", "Campus", Sparkles],
+    ["dashboard", "Inicio", Sparkles],
     ["subjects", "Asignaturas", BookOpen],
     ["study-map", "Mapa de estudio", Network],
     ["calendar", "Calendario", CalendarDays],
@@ -443,8 +443,8 @@ function SidebarContent({ nav, view, setView, subjects, cloudUser, syncStatus, o
           <Sparkles size={22} />
         </span>
         <span>
-          <span className="block text-lg font-black">Campus Verano</span>
-          <span className="text-sm text-slate-500">Estudio personal</span>
+          <span className="block text-lg font-black">AppStudios</span>
+          <span className="text-sm text-slate-500">Estudio inteligente</span>
         </span>
       </button>
       <nav className="space-y-1">
@@ -591,7 +591,7 @@ function Dashboard({ data, stats, allThemes, setView, openModal, updateData, que
           <div className="grid gap-6 p-6 md:grid-cols-[1fr_260px] md:p-8">
             <div>
               <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#f4c36b]">Dashboard principal</p>
-              <h1 className="mt-3 max-w-2xl text-4xl font-black leading-tight md:text-6xl">Tu campus de estudio de verano</h1>
+              <h1 className="mt-3 max-w-2xl text-4xl font-black leading-tight md:text-6xl">AppStudios</h1>
               <p className="mt-4 max-w-xl text-base text-white/70">
                 Un espacio visual para moverte de asignaturas a temas, trabajar apuntes y mantener visible lo próximo.
               </p>
@@ -648,7 +648,7 @@ function SubjectsPage({ data, setView, openModal, updateData, query }) {
   const subjects = filterItems(data.subjects, query, ["name", "description"]);
   return (
     <div className="space-y-5">
-      <PageTitle title="Asignaturas" subtitle="Organiza cada materia como un edificio propio del campus." action={() => openModal({ type: "subject" })} />
+      <PageTitle title="Asignaturas" subtitle="Organiza cada materia como un espacio propio dentro de AppStudios." action={() => openModal({ type: "subject" })} />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {subjects.map((subject) => (
           <SubjectCard key={subject.id} subject={subject} setView={setView} openModal={openModal} updateData={updateData} large />

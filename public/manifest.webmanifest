@@ -1,7 +1,7 @@
 {
-  "name": "Campus Verano",
-  "short_name": "Campus",
-  "description": "Campus personal para organizar asignaturas, temas, apuntes y preguntas.",
+  "name": "AppStudios",
+  "short_name": "AppStudios",
+  "description": "AppStudios para organizar asignaturas, temas, apuntes y preguntas de estudio.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f7f4ee",

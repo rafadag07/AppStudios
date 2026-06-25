@@ -1,6 +1,6 @@
-# Campus Verano gratis: web + sincronizacion
+# AppStudios gratis: web + sincronizacion
 
-Esta app ya funciona en local aunque no configures nada. Para tenerla en varios dispositivos y sincronizada gratis, usa:
+AppStudios ya funciona en local aunque no configures nada. Para tenerlo en varios dispositivos y sincronizado gratis, usa:
 
 - Vercel Hobby: alojamiento gratuito para la web.
 - Supabase Free: base de datos, login por email y archivos.

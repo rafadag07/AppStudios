@@ -93,7 +93,7 @@ export const initialData = {
     {
       id: "sub_algoritmos",
       name: "Diseño de Algoritmos",
-      description: "Campus táctico para practicar, demostrar y resolver problemas.",
+      description: "Espacio tactico para practicar, demostrar y resolver problemas.",
       color: "#2f6f73",
       icon: "network",
       targetDate: iso(48),
