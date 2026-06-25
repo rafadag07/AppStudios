@@ -836,9 +836,15 @@ function SubjectsPage({ data, setView, openModal, updateData, query }) {
 }
 
 function StudyMapPage({ data, setView, updateData }) {
+  const [mapView, setMapView] = useState("tree");
   const enrichedSubjects = data.subjects.map((subject) => {
     const themes = subject.themes.map((theme) => enrichTheme(theme, subject, data.tasks));
-    return { ...subject, themes };
+    const sections = getAllSubjectSections(subject).map((section) => ({
+      ...section,
+      themes: section.id === "preguntas" ? [] : themes.filter((theme) => (theme.section || "teoria") === section.id),
+      questions: section.id === "preguntas" ? subject.qa || [] : [],
+    }));
+    return { ...subject, themes, sections };
   });
 
   const setThemeStudyState = (subjectId, themeId, status) => {
@@ -849,66 +855,113 @@ function StudyMapPage({ data, setView, updateData }) {
     });
   };
 
+  const views = [
+    { id: "tree", label: "Arbol" },
+    { id: "board", label: "Tablero" },
+    { id: "route", label: "Ruta" },
+    { id: "matrix", label: "Matriz" },
+  ];
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-4xl font-black">Mapa de estudio</h1>
-          <p className="mt-1 text-slate-600">Esquema global compacto de asignaturas y temas.</p>
+          <p className="mt-1 text-slate-600">Vista global de asignaturas, apartados y temas.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 rounded-lg border border-slate-900/10 bg-white p-1 shadow-sm">
+          {views.map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              onClick={() => setMapView(view.id)}
+              className={`rounded-lg px-4 py-2 text-sm font-black transition ${mapView === view.id ? "bg-[#172033] text-white" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
+            >
+              {view.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-        {enrichedSubjects.map((subject) => (
-          <StudySubjectMap key={subject.id} subject={subject} setView={setView} setThemeStudyState={setThemeStudyState} />
-        ))}
-      </div>
+      {mapView === "tree" && (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {enrichedSubjects.map((subject) => (
+            <StudySubjectTreeMap key={subject.id} subject={subject} setView={setView} setThemeStudyState={setThemeStudyState} />
+          ))}
+        </div>
+      )}
+
+      {mapView === "board" && <StudyBoardView subjects={enrichedSubjects} setView={setView} setThemeStudyState={setThemeStudyState} />}
+      {mapView === "route" && <StudyRouteView subjects={enrichedSubjects} setView={setView} setThemeStudyState={setThemeStudyState} />}
+      {mapView === "matrix" && <StudyMatrixView subjects={enrichedSubjects} setView={setView} setThemeStudyState={setThemeStudyState} />}
     </div>
   );
 }
 
-function StudySubjectMap({ subject, setView, setThemeStudyState }) {
+function StudySubjectTreeMap({ subject, setView, setThemeStudyState }) {
   return (
     <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
-      <button
-        onClick={() => setView({ page: "subject", subjectId: subject.id })}
-        className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition hover:bg-slate-50"
-      >
-        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white shadow-sm" style={{ background: subject.color }}>
-          {(() => {
-            const Icon = iconMap[subject.icon] || BookOpen;
-            return <Icon size={21} />;
-          })()}
-        </span>
-        <span className="min-w-0">
-          <span className="block truncate text-lg font-black">{subject.name}</span>
-          <span className="text-xs font-bold uppercase text-slate-400">{subject.themes.length} temas</span>
-        </span>
-      </button>
-
-      <div className="relative ml-5 mt-3 border-l-2 border-slate-200 pl-5">
-        {subject.themes.length === 0 && <span className="rounded bg-slate-100 px-2 py-1 text-xs font-bold text-slate-400">Sin temas</span>}
-        <div className="space-y-2">
-          {subject.themes.map((theme) => (
-            <StudyThemeNode
-              key={theme.id}
-              subject={subject}
-              theme={theme}
-              setView={setView}
-              setThemeStudyState={setThemeStudyState}
-            />
-          ))}
-        </div>
+      <StudySubjectHeader subject={subject} setView={setView} />
+      <div className="mt-4 space-y-4">
+        {subject.sections.map((section) => (
+          <StudySectionBranch key={section.id} subject={subject} section={section} setView={setView} setThemeStudyState={setThemeStudyState} />
+        ))}
       </div>
     </section>
   );
 }
 
-function StudyThemeNode({ subject, theme, setView, setThemeStudyState }) {
+function StudySubjectHeader({ subject, setView }) {
+  const Icon = iconMap[subject.icon] || BookOpen;
+  return (
+    <button
+      onClick={() => setView({ page: "subject", subjectId: subject.id })}
+      className="flex w-full items-center gap-3 rounded-lg bg-slate-50 p-3 text-left transition hover:bg-slate-100"
+    >
+      <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg text-white shadow-sm" style={{ background: subject.color }}>
+        <Icon size={22} />
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-xl font-black">{subject.name}</span>
+        <span className="text-xs font-bold uppercase text-slate-400">{subject.sections.length} apartados · {subject.themes.length} temas</span>
+      </span>
+    </button>
+  );
+}
+
+function StudySectionBranch({ subject, section, setView, setThemeStudyState }) {
+  const isQuestions = section.id === "preguntas";
+  const total = isQuestions ? section.questions.length : section.themes.length;
+  return (
+    <div className="relative border-l-2 border-slate-200 pl-5">
+      <span className="absolute -left-1.5 top-2 h-3 w-3 rounded-full bg-[#2f6f73] ring-4 ring-white" />
+      <button
+        type="button"
+        onClick={() => setView(isQuestions ? { page: "subject-qa", subjectId: subject.id } : { page: "subject", subjectId: subject.id })}
+        className="mb-2 flex w-full items-center justify-between rounded-lg bg-white px-3 py-2 text-left hover:bg-slate-50"
+      >
+        <span className="text-sm font-black uppercase tracking-[0.12em] text-slate-500">{section.label}</span>
+        <span className="rounded bg-slate-100 px-2 py-1 text-xs font-black text-slate-500">{total}</span>
+      </button>
+      {isQuestions ? (
+        <StudyQuestionsNode subject={subject} count={section.questions.length} setView={setView} />
+      ) : section.themes.length ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {section.themes.map((theme) => (
+            <StudyThemeNode key={theme.id} subject={subject} theme={theme} setView={setView} setThemeStudyState={setThemeStudyState} compact />
+          ))}
+        </div>
+      ) : (
+        <span className="inline-flex rounded bg-slate-100 px-2 py-1 text-xs font-bold text-slate-400">Sin temas</span>
+      )}
+    </div>
+  );
+}
+
+function StudyThemeNode({ subject, theme, setView, setThemeStudyState, compact = false }) {
   const tone = stateTone(theme.studyState);
   return (
-    <div className="relative rounded-lg border border-slate-900/10 bg-slate-50 p-2">
-      <span className="absolute -left-[22px] top-5 h-0.5 w-5 bg-slate-200" />
+    <div className="rounded-lg border border-slate-900/10 bg-slate-50 p-2">
       <div className="flex items-center gap-2">
         <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: tone.dot }} />
         <button
@@ -919,6 +972,7 @@ function StudyThemeNode({ subject, theme, setView, setThemeStudyState }) {
           {theme.name}
         </button>
       </div>
+      {!compact && theme.description && <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-500">{theme.description}</p>}
       <div className="mt-2 flex gap-1">
         {studyStateOptions.map((option) => {
           const optionTone = stateTone(option.id);
@@ -929,9 +983,7 @@ function StudyThemeNode({ subject, theme, setView, setThemeStudyState }) {
               type="button"
               title={option.label}
               onClick={() => setThemeStudyState(subject.id, theme.id, option.id)}
-              className={`h-6 flex-1 rounded border text-[10px] font-black uppercase transition ${
-                active ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 opacity-75"
-              }`}
+              className={`h-6 flex-1 rounded border text-[10px] font-black uppercase transition ${active ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 opacity-75"}`}
               style={{ background: optionTone.soft }}
             >
               {option.short}
@@ -943,6 +995,111 @@ function StudyThemeNode({ subject, theme, setView, setThemeStudyState }) {
   );
 }
 
+function StudyQuestionsNode({ subject, count, setView }) {
+  const dominated = subject.qa?.filter((item) => item.status === "dominada").length || 0;
+  return (
+    <button
+      type="button"
+      onClick={() => setView({ page: "subject-qa", subjectId: subject.id })}
+      className="w-full rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-soft"
+    >
+      <span className="block text-sm font-black text-emerald-900">Banco de preguntas</span>
+      <span className="mt-1 block text-xs font-bold text-emerald-700">{count} preguntas · {dominated} dominadas</span>
+    </button>
+  );
+}
+
+function StudyBoardView({ subjects, setView, setThemeStudyState }) {
+  return (
+    <div className="space-y-4">
+      {subjects.map((subject) => (
+        <section key={subject.id} className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
+          <StudySubjectHeader subject={subject} setView={setView} />
+          <div className="mt-4 grid gap-3 lg:grid-cols-4">
+            {subject.sections.map((section) => (
+              <div key={section.id} className="rounded-lg bg-slate-50 p-3">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h3 className="truncate text-sm font-black uppercase tracking-[0.12em] text-slate-500">{section.label}</h3>
+                  <span className="rounded bg-white px-2 py-1 text-xs font-black text-slate-400">{section.id === "preguntas" ? section.questions.length : section.themes.length}</span>
+                </div>
+                {section.id === "preguntas" ? (
+                  <StudyQuestionsNode subject={subject} count={section.questions.length} setView={setView} />
+                ) : section.themes.length ? (
+                  <div className="space-y-2">{section.themes.map((theme) => <StudyThemeNode key={theme.id} subject={subject} theme={theme} setView={setView} setThemeStudyState={setThemeStudyState} compact />)}</div>
+                ) : (
+                  <p className="rounded bg-white p-3 text-sm font-bold text-slate-400">Sin temas</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function StudyRouteView({ subjects, setView, setThemeStudyState }) {
+  return (
+    <div className="space-y-6">
+      {subjects.map((subject) => (
+        <section key={subject.id} className="rounded-lg border border-slate-900/10 bg-white p-5 shadow-sm">
+          <StudySubjectHeader subject={subject} setView={setView} />
+          <div className="mt-5 overflow-x-auto pb-2">
+            <div className="flex min-w-max items-start gap-4">
+              {subject.sections.map((section, sectionIndex) => (
+                <div key={section.id} className="flex items-start gap-4">
+                  <div className="w-64 rounded-lg border border-slate-900/10 bg-slate-50 p-3">
+                    <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Paso {sectionIndex + 1}</p>
+                    <h3 className="mt-1 text-lg font-black">{section.label}</h3>
+                    <div className="mt-3 space-y-2">
+                      {section.id === "preguntas" ? <StudyQuestionsNode subject={subject} count={section.questions.length} setView={setView} /> : section.themes.length ? section.themes.map((theme) => <StudyThemeNode key={theme.id} subject={subject} theme={theme} setView={setView} setThemeStudyState={setThemeStudyState} compact />) : <p className="text-sm font-bold text-slate-400">Sin temas</p>}
+                    </div>
+                  </div>
+                  {sectionIndex < subject.sections.length - 1 && <div className="mt-16 h-1 w-10 rounded bg-slate-200" />}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function StudyMatrixView({ subjects, setView, setThemeStudyState }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-slate-900/10 bg-white shadow-sm">
+      <table className="min-w-full border-collapse text-left">
+        <thead className="bg-slate-50 text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+          <tr>
+            <th className="w-64 border-b border-slate-900/10 p-3">Asignatura</th>
+            <th className="border-b border-slate-900/10 p-3">Apartados y temas</th>
+          </tr>
+        </thead>
+        <tbody>
+          {subjects.map((subject) => (
+            <tr key={subject.id} className="border-b border-slate-900/10 align-top last:border-b-0">
+              <td className="p-3"><StudySubjectHeader subject={subject} setView={setView} /></td>
+              <td className="p-3">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {subject.sections.map((section) => (
+                    <div key={section.id} className="rounded-lg border border-slate-900/10 p-3">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <h3 className="truncate text-xs font-black uppercase tracking-[0.12em] text-slate-500">{section.label}</h3>
+                        <span className="rounded bg-slate-100 px-2 py-1 text-xs font-black text-slate-400">{section.id === "preguntas" ? section.questions.length : section.themes.length}</span>
+                      </div>
+                      {section.id === "preguntas" ? <StudyQuestionsNode subject={subject} count={section.questions.length} setView={setView} /> : section.themes.length ? <div className="space-y-2">{section.themes.map((theme) => <StudyThemeNode key={theme.id} subject={subject} theme={theme} setView={setView} setThemeStudyState={setThemeStudyState} compact />)}</div> : <p className="text-sm font-bold text-slate-400">Sin temas</p>}
+                    </div>
+                  ))}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 function SubjectPage({ subject, setView, openModal, updateData }) {
   const [activeSection, setActiveSection] = useState("teoria");
   const [sectionsOpen, setSectionsOpen] = useState(false);
