@@ -2824,6 +2824,9 @@ function EditorTool({ icon: Icon, label, onClick }) {
 
 function CalendarPage({ data, openModal, updateData }) {
   const [visibleMonth, setVisibleMonth] = useState(() => new Date());
+  const [selectedEventId, setSelectedEventId] = useState(null);
+  const [copiedEvent, setCopiedEvent] = useState(null);
+  const [focusedDate, setFocusedDate] = useState(todayIso());
   const year = visibleMonth.getFullYear();
   const month = visibleMonth.getMonth();
   const first = new Date(year, month, 1);
@@ -2831,10 +2834,94 @@ function CalendarPage({ data, openModal, updateData }) {
   const total = new Date(year, month + 1, 0).getDate();
   const cells = Array.from({ length: startOffset + total }, (_, index) => (index < startOffset ? null : index - startOffset + 1));
   const monthLabel = visibleMonth.toLocaleDateString("es-ES", { month: "long", year: "numeric" });
+  const selectedEvent = useMemo(() => data.events.find((event) => event.id === selectedEventId) || null, [data.events, selectedEventId]);
 
   const moveMonth = (offset) => {
     setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
   };
+
+  const moveEventToDate = (eventId, date) => {
+    updateData((draft) => {
+      const target = draft.events.find((item) => item.id === eventId);
+      if (target) target.date = date;
+      return draft;
+    });
+    setSelectedEventId(eventId);
+    setFocusedDate(date);
+  };
+
+  const duplicateEventToDate = (event, date) => {
+    const nextEvent = { ...event, id: createId("event"), date };
+    updateData((draft) => {
+      draft.events.push(nextEvent);
+      return draft;
+    });
+    setSelectedEventId(nextEvent.id);
+    setFocusedDate(date);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      const target = event.target;
+      const isTyping = ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName) || target?.isContentEditable;
+      if (isTyping) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && selectedEvent) {
+        event.preventDefault();
+        setCopiedEvent(selectedEvent);
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v" && copiedEvent) {
+        event.preventDefault();
+        duplicateEventToDate(copiedEvent, focusedDate || copiedEvent.date || todayIso());
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [copiedEvent, focusedDate, selectedEvent]);
+
+  const dayDropHandlers = (date) => ({
+    onDragOver: (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    },
+    onDrop: (event) => {
+      event.preventDefault();
+      const eventId = event.dataTransfer.getData("text/appstudios-event");
+      if (eventId) moveEventToDate(eventId, date);
+    },
+  });
+
+  const eventHandlers = (calendarEvent) => ({
+    draggable: true,
+    onClick: (clickEvent) => {
+      clickEvent.stopPropagation();
+      setSelectedEventId(calendarEvent.id);
+      setFocusedDate(calendarEvent.date);
+    },
+    onDoubleClick: (clickEvent) => {
+      clickEvent.stopPropagation();
+      openModal({ type: "event", item: calendarEvent });
+    },
+    onDragStart: (dragEvent) => {
+      dragEvent.stopPropagation();
+      dragEvent.dataTransfer.effectAllowed = "move";
+      dragEvent.dataTransfer.setData("text/appstudios-event", calendarEvent.id);
+      setSelectedEventId(calendarEvent.id);
+      setFocusedDate(calendarEvent.date);
+    },
+  });
+
+  const renderEvent = (event, mobile = false) => (
+    <span
+      key={event.id}
+      {...eventHandlers(event)}
+      className={`${mobile ? "block px-3 py-2 text-sm" : "block w-full px-2 py-1 text-xs"} cursor-grab rounded font-bold active:cursor-grabbing ${
+        selectedEventId === event.id ? "bg-[#172033] text-white ring-2 ring-[#f4c36b]" : mobile ? "bg-slate-50 text-slate-700" : "bg-[#dcebdc] text-[#1f5d55]"
+      }`}
+      title="Clic para seleccionar, doble clic para editar, arrastra para mover"
+    >
+      {event.start ? `${event.start} · ` : ""}{event.title}
+    </span>
+  );
 
   return (
     <div className="space-y-5">
@@ -2842,6 +2929,9 @@ function CalendarPage({ data, openModal, updateData }) {
         <div>
           <h1 className="text-4xl font-black">Calendario mensual</h1>
           <p className="mt-1 text-slate-600 capitalize">{monthLabel}</p>
+          <p className="mt-1 text-xs font-black uppercase tracking-[0.14em] text-slate-400">
+            {selectedEvent ? "Evento seleccionado: Ctrl+C para copiar y Ctrl+V en el dia marcado para duplicar" : "Selecciona un evento para copiarlo o arrastrarlo"}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <IconButton icon={ChevronLeft} label="Mes anterior" onClick={() => moveMonth(-1)} />
@@ -2859,11 +2949,16 @@ function CalendarPage({ data, openModal, updateData }) {
           const events = data.events.filter((event) => event.date === date);
           const weekday = new Date(year, month, day).toLocaleDateString("es-ES", { weekday: "short" });
           return (
-            <button
+            <div
               key={date}
-              type="button"
-              onClick={() => openModal({ type: "event", date })}
-              className="rounded-lg border border-slate-900/10 bg-white p-4 text-left shadow-sm"
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                setFocusedDate(date);
+                if (!selectedEvent && !copiedEvent) openModal({ type: "event", date });
+              }}
+              {...dayDropHandlers(date)}
+              className={`rounded-lg border bg-white p-4 text-left shadow-sm ${focusedDate === date ? "border-[#2f6f73] ring-2 ring-[#2f6f73]/15" : "border-slate-900/10"}`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -2876,23 +2971,8 @@ function CalendarPage({ data, openModal, updateData }) {
                   {events.length ? `${events.length} evento${events.length > 1 ? "s" : ""}` : "Crear"}
                 </span>
               </div>
-              {events.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {events.map((event) => (
-                    <span
-                      key={event.id}
-                      onClick={(clickEvent) => {
-                        clickEvent.stopPropagation();
-                        openModal({ type: "event", item: event });
-                      }}
-                      className="block rounded bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700"
-                    >
-                      {event.start ? `${event.start} · ` : ""}{event.title}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </button>
+              {events.length > 0 && <div className="mt-3 space-y-2">{events.map((event) => renderEvent(event, true))}</div>}
+            </div>
           );
         })}
       </div>
@@ -2905,37 +2985,28 @@ function CalendarPage({ data, openModal, updateData }) {
           const date = day ? `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}` : "";
           const events = data.events.filter((event) => event.date === date);
           return (
-            <button
+            <div
               key={index}
-              type="button"
-              disabled={!day}
-              aria-label={day ? `Crear evento el ${date}` : "Día vacío"}
-              onClick={() => day && openModal({ type: "event", date })}
-              className={`min-h-32 rounded-lg border border-slate-900/10 bg-white p-2 text-left transition hover:-translate-y-0.5 hover:shadow-soft ${!day ? "opacity-0" : ""}`}
+              role={day ? "button" : "presentation"}
+              tabIndex={day ? 0 : -1}
+              aria-label={day ? `Crear evento el ${date}` : "Dia vacio"}
+              onClick={() => {
+                if (!day) return;
+                setFocusedDate(date);
+                if (!selectedEvent && !copiedEvent) openModal({ type: "event", date });
+              }}
+              {...(day ? dayDropHandlers(date) : {})}
+              className={`min-h-32 rounded-lg border bg-white p-2 text-left transition hover:-translate-y-0.5 hover:shadow-soft ${!day ? "opacity-0" : ""} ${focusedDate === date ? "border-[#2f6f73] ring-2 ring-[#2f6f73]/15" : "border-slate-900/10"}`}
             >
               <span className={`inline-grid h-8 w-8 place-items-center rounded-lg text-sm font-black ${date === todayIso() ? "bg-[#172033] text-white" : ""}`}>{day}</span>
-              <div className="mt-2 space-y-1">
-                {events.map((event) => (
-                  <span
-                    key={event.id}
-                    onClick={(clickEvent) => {
-                      clickEvent.stopPropagation();
-                      openModal({ type: "event", item: event });
-                    }}
-                    className="block w-full rounded bg-[#dcebdc] px-2 py-1 text-xs font-bold text-[#1f5d55]"
-                  >
-                    {event.start ? `${event.start} · ` : ""}{event.title}
-                  </span>
-                ))}
-              </div>
-            </button>
+              <div className="mt-2 space-y-1">{events.map((event) => renderEvent(event))}</div>
+            </div>
           );
         })}
       </div>
     </div>
   );
 }
-
 function SchedulePage({ data, openModal, updateData }) {
   return (
     <div className="space-y-5">
