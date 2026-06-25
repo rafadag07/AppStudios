@@ -586,23 +586,23 @@ function Dashboard({ data, stats, allThemes, setView, openModal, updateData, que
 
   return (
     <div className="space-y-6">
-      <section className="relative min-h-[560px] overflow-hidden rounded-lg bg-cover bg-center shadow-soft" style={{ backgroundImage: "url('/appstudios-dashboard.png')" }}>
-        <div className="absolute inset-0 bg-gradient-to-r from-sky-950/20 via-transparent to-emerald-950/10" />
-        <div className="relative grid min-h-[560px] content-center gap-5 p-5 md:p-8 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className="rounded-lg border border-white/55 bg-sky-900/24 p-6 text-white shadow-soft backdrop-blur-md md:p-8">
+      <section className="relative min-h-[500px] overflow-hidden rounded-lg bg-cover bg-[center_45%] shadow-soft" style={{ backgroundImage: "url('/appstudios-dashboard.png')" }}>
+        <div className="absolute inset-0 bg-gradient-to-r from-sky-950/10 via-transparent to-transparent" />
+        <div className="relative grid min-h-[500px] content-center gap-5 p-5 md:p-7 xl:grid-cols-[0.92fr_0.78fr]">
+          <div className="max-w-2xl rounded-lg border border-white/45 bg-sky-950/12 p-5 text-white shadow-soft backdrop-blur-[5px] md:p-7">
             <p className="text-sm font-bold uppercase tracking-[0.22em] text-[#1f5d55]">Dashboard principal</p>
             <h1 className="mt-3 max-w-2xl text-4xl font-black leading-tight drop-shadow md:text-6xl">AppStudios</h1>
             <div className="mt-5 h-1 w-16 rounded-full bg-emerald-300" />
             <p className="mt-6 max-w-xl text-base font-semibold leading-relaxed text-white md:text-xl">
               Organiza tus asignaturas, apunta mejor y avanza paso a paso hasta tu meta.
             </p>
-            <div className="mt-10 grid gap-3 sm:grid-cols-3">
+            <div className="mt-8 grid gap-3 sm:grid-cols-3">
               <DashboardAction icon={BookOpen} label="Nueva asignatura" tone="green" onClick={() => openModal({ type: "subject" })} />
               <DashboardAction icon={ListChecks} label="Nueva tarea" tone="blue" onClick={() => openModal({ type: "task" })} />
               <DashboardAction icon={Paperclip} label="Nuevo recurso" tone="purple" onClick={() => openModal({ type: "resource" })} />
             </div>
           </div>
-          <div className="grid content-center gap-4 sm:grid-cols-2">
+          <div className="grid content-center gap-3 sm:grid-cols-2">
             <DashboardStat icon={ListChecks} label="Tareas pendientes" value={stats.pendingTasks} accent="bg-blue-500" iconClass="bg-blue-50 text-blue-600" />
             <DashboardStat icon={BookOpen} label="Temas completados" value={`${stats.completedThemes}/${stats.totalThemes}`} accent="bg-emerald-500" iconClass="bg-emerald-50 text-emerald-600" />
             <DashboardStat icon={Network} label="Asignaturas" value={data.subjects.length} accent="bg-amber-500" iconClass="bg-amber-50 text-amber-600" />
@@ -2871,21 +2871,21 @@ function DashboardAction({ icon: Icon, label, tone, onClick }) {
     purple: "text-violet-700 ring-violet-200/80 hover:bg-violet-50",
   }[tone] || "text-slate-800 ring-slate-200 hover:bg-slate-50";
   return (
-    <button onClick={onClick} className={`inline-flex h-16 items-center justify-center gap-3 rounded-lg bg-white/88 px-4 text-sm font-black shadow-sm ring-1 backdrop-blur transition ${toneClass}`}>
-      <Icon size={24} /> {label}
+    <button onClick={onClick} className={`inline-flex h-14 items-center justify-center gap-2 rounded-lg bg-white/72 px-3 text-sm font-black shadow-sm ring-1 backdrop-blur-[3px] transition ${toneClass}`}>
+      <Icon size={21} /> {label}
     </button>
   );
 }
 
 function DashboardStat({ icon: Icon, label, value, accent, iconClass }) {
   return (
-    <article className="min-h-44 rounded-lg border border-white/55 bg-white/40 p-5 text-[#10213d] shadow-soft backdrop-blur-md">
-      <span className={`grid h-14 w-14 place-items-center rounded-full shadow-sm ${iconClass}`}>
-        <Icon size={26} />
+    <article className="min-h-36 rounded-lg border border-white/45 bg-white/24 p-4 text-[#10213d] shadow-soft backdrop-blur-[5px]">
+      <span className={`grid h-11 w-11 place-items-center rounded-full shadow-sm ${iconClass}`}>
+        <Icon size={22} />
       </span>
-      <p className="mt-6 text-base font-black text-slate-700">{label}</p>
+      <p className="mt-4 text-sm font-black text-slate-700">{label}</p>
       <span className={`mt-3 block h-1 w-7 rounded-full ${accent}`} />
-      <p className="mt-4 text-4xl font-black">{value}</p>
+      <p className="mt-3 text-3xl font-black">{value}</p>
     </article>
   );
 }
