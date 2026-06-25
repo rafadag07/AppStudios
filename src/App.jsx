@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
+import * as pdfjsLib from "pdfjs-dist";
+import pdfWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
+import "pdfjs-dist/web/pdf_viewer.css";
 import {
   AlignCenter,
   AlignLeft,
@@ -68,6 +71,8 @@ import {
   subscribeToSharedSpace,
   supabase,
 } from "./data/supabaseClient";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 const days = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"];
 const statuses = ["nada", "medio", "estudiado"];
@@ -451,6 +456,7 @@ function App() {
 
   const currentSubject = view.subjectId ? data.subjects.find((subject) => subject.id === view.subjectId) : null;
   const currentTheme = currentSubject?.themes.find((theme) => theme.id === view.themeId);
+  const currentMedia = currentTheme?.media?.find((file) => file.id === view.mediaId);
 
   return (
     <div className="min-h-screen bg-[#f7f4ee] text-slate-900 campus-grid">
@@ -492,6 +498,16 @@ function App() {
         )}
         {view.page === "theme" && currentSubject && currentTheme && (
           <ThemePage subject={currentSubject} theme={currentTheme} openModal={setModal} updateData={updateData} setView={setView} syncStatus={syncStatus} />
+        )}
+        {view.page === "pdf" && currentSubject && currentTheme && currentMedia && (
+          <PdfViewerPage
+            subject={currentSubject}
+            theme={currentTheme}
+            file={currentMedia}
+            initialPage={view.pageNumber || 1}
+            setView={setView}
+            updateData={updateData}
+          />
         )}
         {view.page === "calendar" && <CalendarPage data={data} openModal={setModal} updateData={updateData} />}
         {view.page === "schedule" && <SchedulePage data={data} openModal={setModal} updateData={updateData} />}
@@ -1208,7 +1224,32 @@ function ThemePage({ subject, theme, openModal, updateData, setView, syncStatus 
             ) : (
               <div className="grid gap-2">
                 {theme.media.map((file) => (
-                  <StoredFileLink key={file.id} file={file} onPreview={() => setPreviewFile(file)} onDelete={() => deleteFile(file.id)} />
+                  <StoredFileLink
+                    key={file.id}
+                    file={file}
+                    onPreview={() => {
+                      if (file.type === "pdf" || file.mime?.includes("pdf")) {
+                        setView({ page: "pdf", subjectId: subject.id, themeId: theme.id, mediaId: file.id });
+                      } else {
+                        setPreviewFile(file);
+                      }
+                    }}
+                    onDelete={() => deleteFile(file.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </ThemeSection>
+          <ThemeSection title="Revisar mÃ¡s tarde" icon={Clock3}>
+            {(theme.reviewLater || []).length === 0 ? (
+              <div className="rounded-lg bg-slate-50 p-4 text-sm font-bold text-slate-500">No hay fragmentos marcados todavÃ­a.</div>
+            ) : (
+              <div className="space-y-2">
+                {(theme.reviewLater || []).map((item) => (
+                  <div key={item.id} className="rounded-lg bg-slate-50 p-3 text-sm">
+                    <p className="line-clamp-3 font-semibold text-slate-700">{item.text}</p>
+                    <p className="mt-2 text-xs font-black uppercase text-slate-400">{item.pdfName} · pÃ¡gina {item.page}</p>
+                  </div>
                 ))}
               </div>
             )}
@@ -1297,6 +1338,320 @@ function ThemeDocumentIndex({ html }) {
         </div>
       )}
     </section>
+  );
+}
+
+function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData }) {
+  const [pdfDoc, setPdfDoc] = useState(null);
+  const [pageNumber, setPageNumber] = useState(initialPage || 1);
+  const [zoom, setZoom] = useState(1.15);
+  const [search, setSearch] = useState("");
+  const [pageTexts, setPageTexts] = useState([]);
+  const [selection, setSelection] = useState(null);
+  const [questionDraft, setQuestionDraft] = useState(null);
+  const [answerError, setAnswerError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    setPageNumber(initialPage || 1);
+  }, [initialPage, file.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError("");
+    setPdfDoc(null);
+    setPageTexts([]);
+    getStoredFile(file.fileId)
+      .then(async (stored) => {
+        if (!stored?.blob) throw new Error("Archivo no encontrado");
+        const buffer = await stored.blob.arrayBuffer();
+        const loaded = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+        if (cancelled) return;
+        setPdfDoc(loaded);
+        setPageNumber(Math.min(Math.max(initialPage || 1, 1), loaded.numPages));
+        setLoading(false);
+        const texts = [];
+        for (let index = 1; index <= loaded.numPages; index += 1) {
+          const page = await loaded.getPage(index);
+          const content = await page.getTextContent();
+          texts[index] = content.items.map((item) => item.str).join(" ");
+          if (cancelled) return;
+          setPageTexts([...texts]);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLoading(false);
+        setLoadError("No se ha podido cargar este PDF.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [file.fileId, file.id, initialPage]);
+
+  const goToSearch = () => {
+    const clean = search.trim().toLowerCase();
+    if (!clean || !pageTexts.length) return;
+    const start = pageNumber + 1;
+    const ordered = [
+      ...pageTexts.slice(start),
+      ...pageTexts.slice(1, start),
+    ];
+    const found = ordered.findIndex((text) => text?.toLowerCase().includes(clean));
+    if (found < 0) return;
+    const nextPage = found + start <= pageTexts.length - 1 ? found + start : found + 1;
+    setPageNumber(nextPage);
+  };
+
+  const selectedText = selection?.text?.trim() || "";
+  const addTextToNotes = () => {
+    if (!selectedText) return;
+    updateData((draft) => {
+      const target = findTheme(draft, subject.id, theme.id);
+      target.documentHtml = `${target.documentHtml || buildThemeDocument(target)}
+        <blockquote data-pdf-source="${file.id}" data-pdf-page="${pageNumber}">
+          <strong>Fragmento de PDF: ${escapeHtml(file.name)}, pagina ${pageNumber}</strong>
+          <p>${escapeHtml(selectedText)}</p>
+        </blockquote>`;
+      return draft;
+    });
+    setSelection(null);
+  };
+
+  const addDoubt = () => {
+    if (!selectedText) return;
+    updateData((draft) => {
+      const target = findTheme(draft, subject.id, theme.id);
+      if (!target.doubts) target.doubts = [];
+      target.doubts.push({
+        id: createId("doubt"),
+        question: selectedText,
+        resolved: false,
+        sourcePdfName: file.name,
+        sourcePdfPage: pageNumber,
+        createdAt: new Date().toISOString(),
+      });
+      return draft;
+    });
+    setSelection(null);
+  };
+
+  const markForReview = () => {
+    if (!selectedText) return;
+    updateData((draft) => {
+      const target = findTheme(draft, subject.id, theme.id);
+      if (!target.reviewLater) target.reviewLater = [];
+      target.reviewLater.unshift({
+        id: createId("review"),
+        text: selectedText,
+        pdfName: file.name,
+        pdfId: file.id,
+        page: pageNumber,
+        createdAt: new Date().toISOString(),
+      });
+      return draft;
+    });
+    setSelection(null);
+  };
+
+  const openQuestionModal = () => {
+    if (!selectedText) return;
+    setQuestionDraft({ question: selectedText, answer: "", status: "pendiente" });
+    setAnswerError("");
+    setSelection(null);
+  };
+
+  const saveQuestionFromPdf = () => {
+    if (!questionDraft?.answer?.trim()) {
+      setAnswerError("Debes escribir una respuesta antes de guardar la pregunta.");
+      return;
+    }
+    updateData((draft) => {
+      const target = draft.subjects.find((item) => item.id === subject.id);
+      if (!target.qa) target.qa = [];
+      target.qa.unshift({
+        id: createId("qa"),
+        question: questionDraft.question.trim(),
+        answer: questionDraft.answer.trim(),
+        status: questionDraft.status || "pendiente",
+        sourceSubjectId: subject.id,
+        sourceThemeId: theme.id,
+        sourceThemeName: theme.name,
+        sourcePdfMediaId: file.id,
+        sourcePdfName: file.name,
+        sourcePdfPage: pageNumber,
+        createdAt: new Date().toISOString(),
+      });
+      return draft;
+    });
+    setQuestionDraft(null);
+  };
+
+  return (
+    <div className="space-y-4">
+      <section className="sticky top-0 z-30 rounded-lg border border-slate-900/10 bg-white/95 p-4 shadow-soft backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <button onClick={() => setView({ page: "theme", subjectId: subject.id, themeId: theme.id })} className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-slate-900">
+              <ChevronLeft size={18} /> Volver al tema
+            </button>
+            <p className="truncate text-xs font-black uppercase tracking-[0.16em] text-slate-400">{subject.name} / {theme.name}</p>
+            <h1 className="truncate text-2xl font-black">{file.name}</h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setPageNumber((value) => Math.max(1, value - 1))} className="h-10 rounded-lg bg-slate-100 px-3 font-black"><ChevronLeft size={18} /></button>
+            <span className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-black">Pagina {pageNumber} / {pdfDoc?.numPages || "-"}</span>
+            <button onClick={() => setPageNumber((value) => Math.min(pdfDoc?.numPages || value, value + 1))} className="h-10 rounded-lg bg-slate-100 px-3 font-black"><ChevronRight size={18} /></button>
+            <button onClick={() => setZoom((value) => Math.max(0.65, Number((value - 0.1).toFixed(2))))} className="h-10 rounded-lg bg-slate-100 px-3 font-black">-</button>
+            <span className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-black">{Math.round(zoom * 100)}%</span>
+            <button onClick={() => setZoom((value) => Math.min(2.4, Number((value + 0.1).toFixed(2))))} className="h-10 rounded-lg bg-slate-100 px-3 font-black">+</button>
+          </div>
+        </div>
+        <div className="mt-3 flex gap-2">
+          <input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && goToSearch()} className="input" placeholder="Buscar texto en el PDF" />
+          <button onClick={goToSearch} className="rounded-lg bg-[#172033] px-4 text-sm font-black text-white">Buscar</button>
+        </div>
+      </section>
+
+      <section className="relative min-h-[70vh] rounded-lg border border-slate-900/10 bg-slate-100 p-4 shadow-inner">
+        {loading && <p className="p-10 text-center font-black text-slate-500">Cargando PDF...</p>}
+        {loadError && <p className="p-10 text-center font-black text-red-500">{loadError}</p>}
+        {pdfDoc && (
+          <PdfPageCanvas
+            pdfDoc={pdfDoc}
+            pageNumber={pageNumber}
+            zoom={zoom}
+            search={search}
+            onSelection={(nextSelection) => setSelection(nextSelection)}
+          />
+        )}
+        {selection && (
+          <div className="fixed z-50 flex max-w-[calc(100vw-2rem)] flex-wrap gap-2 rounded-lg border border-slate-900/10 bg-white p-2 shadow-2xl" style={{ left: selection.x, top: selection.y }}>
+            <button onClick={openQuestionModal} className="rounded bg-[#172033] px-3 py-2 text-xs font-black text-white">Crear pregunta</button>
+            <button onClick={markForReview} className="rounded bg-amber-50 px-3 py-2 text-xs font-black text-amber-700">Revisar mas tarde</button>
+            <button onClick={addTextToNotes} className="rounded bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700">Añadir a apuntes</button>
+            <button onClick={addDoubt} className="rounded bg-rose-50 px-3 py-2 text-xs font-black text-rose-700">Añadir duda</button>
+          </div>
+        )}
+      </section>
+
+      {questionDraft && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+          <section className="w-full max-w-2xl rounded-lg bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Creada desde PDF</p>
+                <h2 className="mt-1 text-2xl font-black">Nueva pregunta</h2>
+                <p className="mt-1 text-sm font-semibold text-slate-500">{file.name}, pagina {pageNumber}</p>
+              </div>
+              <IconButton icon={X} label="Cerrar" onClick={() => setQuestionDraft(null)} />
+            </div>
+            <Field label="Pregunta">
+              <textarea value={questionDraft.question} onChange={(event) => setQuestionDraft((current) => ({ ...current, question: event.target.value }))} className="input min-h-28" />
+            </Field>
+            <Field label="Respuesta">
+              <textarea value={questionDraft.answer} onChange={(event) => {
+                setAnswerError("");
+                setQuestionDraft((current) => ({ ...current, answer: event.target.value }));
+              }} className="input min-h-32" />
+            </Field>
+            <Field label="Estado">
+              <select value={questionDraft.status} onChange={(event) => setQuestionDraft((current) => ({ ...current, status: event.target.value }))} className="input">
+                <option value="pendiente">Pendiente</option>
+                <option value="repasando">Repasando</option>
+                <option value="dominada">Dominada</option>
+              </select>
+            </Field>
+            {answerError && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-black text-red-600">{answerError}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setQuestionDraft(null)} className="rounded-lg bg-slate-100 px-4 py-3 text-sm font-black text-slate-600">Cancelar</button>
+              <button onClick={saveQuestionFromPdf} className="rounded-lg bg-[#172033] px-4 py-3 text-sm font-black text-white">Guardar</button>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, onSelection }) {
+  const canvasRef = useRef(null);
+  const layerRef = useRef(null);
+  const pageRef = useRef(null);
+  const [rendering, setRendering] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    let renderTask = null;
+    async function renderPage() {
+      setRendering(true);
+      const page = await pdfDoc.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: zoom });
+      const canvas = canvasRef.current;
+      const layer = layerRef.current;
+      if (!canvas || !layer || cancelled) return;
+      const context = canvas.getContext("2d");
+      const outputScale = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(viewport.width * outputScale);
+      canvas.height = Math.floor(viewport.height * outputScale);
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      layer.style.width = `${viewport.width}px`;
+      layer.style.height = `${viewport.height}px`;
+      layer.innerHTML = "";
+      context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+      renderTask = page.render({ canvasContext: context, viewport });
+      await renderTask.promise;
+      const textContent = await page.getTextContent();
+      const textLayer = new pdfjsLib.TextLayer({ textContentSource: textContent, container: layer, viewport });
+      await textLayer.render();
+      const cleanSearch = search.trim().toLowerCase();
+      if (cleanSearch) {
+        textLayer.textDivs.forEach((div) => {
+          if (div.textContent?.toLowerCase().includes(cleanSearch)) div.classList.add("pdf-search-hit");
+        });
+      }
+      if (!cancelled) setRendering(false);
+    }
+    renderPage().catch(() => {
+      if (!cancelled) setRendering(false);
+    });
+    return () => {
+      cancelled = true;
+      renderTask?.cancel?.();
+    };
+  }, [pdfDoc, pageNumber, zoom, search]);
+
+  const handleMouseUp = () => {
+    window.setTimeout(() => {
+      const rangeSelection = window.getSelection();
+      const text = rangeSelection?.toString().trim();
+      if (!text || !pageRef.current) {
+        onSelection(null);
+        return;
+      }
+      const anchorInside = pageRef.current.contains(rangeSelection.anchorNode);
+      const focusInside = pageRef.current.contains(rangeSelection.focusNode);
+      if (!anchorInside || !focusInside) return;
+      const rect = rangeSelection.getRangeAt(0).getBoundingClientRect();
+      onSelection({
+        text,
+        x: Math.min(window.innerWidth - 260, Math.max(16, rect.left)),
+        y: Math.min(window.innerHeight - 120, Math.max(16, rect.bottom + 10)),
+      });
+    }, 0);
+  };
+
+  return (
+    <div className="overflow-auto">
+      <div ref={pageRef} onMouseUp={handleMouseUp} className="pdf-page-shell relative mx-auto w-max rounded bg-white shadow-soft" style={{ "--scale-factor": zoom }}>
+        {rendering && <div className="absolute inset-0 z-20 grid place-items-center rounded bg-white/70 text-sm font-black text-slate-500">Renderizando...</div>}
+        <canvas ref={canvasRef} className="block" />
+        <div ref={layerRef} className="pdf-text-layer textLayer absolute inset-0" />
+      </div>
+    </div>
   );
 }
 
@@ -2208,6 +2563,8 @@ function SubjectQAPage({ subject, openModal, updateData, setView }) {
             <QACard
               key={item.id}
               item={item}
+              subject={subject}
+              setView={setView}
               onEdit={() => openModal({ type: "qa", subjectId: subject.id, item })}
               onDelete={() => deleteQuestion(item.id)}
               onDominated={() => updateQuestionStatus(item.id, "dominada")}
@@ -2219,8 +2576,9 @@ function SubjectQAPage({ subject, openModal, updateData, setView }) {
   );
 }
 
-function QACard({ item, onEdit, onDelete, onDominated }) {
+function QACard({ item, subject, setView, onEdit, onDelete, onDominated }) {
   const tone = qaTone(item.status);
+  const canOpenSource = item.sourceThemeId && item.sourcePdfMediaId && setView;
   return (
     <article className="rounded-lg border border-slate-900/10 bg-white p-5 shadow-sm" style={{ borderLeft: `7px solid ${tone.color}` }}>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2234,6 +2592,20 @@ function QACard({ item, onEdit, onDelete, onDominated }) {
         </div>
       </div>
       <p className="mt-4 whitespace-pre-wrap text-slate-700">{item.answer}</p>
+      {item.sourcePdfName && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-500">
+          <span>Creada desde PDF: {item.sourcePdfName}, pagina {item.sourcePdfPage || "?"}</span>
+          {canOpenSource && (
+            <button
+              type="button"
+              onClick={() => setView({ page: "pdf", subjectId: item.sourceSubjectId || subject?.id, themeId: item.sourceThemeId, mediaId: item.sourcePdfMediaId, pageNumber: item.sourcePdfPage || 1 })}
+              className="rounded bg-white px-2 py-1 text-xs font-black text-[#1f5d55] shadow-sm"
+            >
+              Volver al PDF
+            </button>
+          )}
+        </div>
+      )}
       {item.status !== "dominada" && (
         <button onClick={onDominated} className="mt-4 rounded-lg bg-green-100 px-3 py-2 text-sm font-black text-green-700">
           Marcar como dominada
@@ -3038,7 +3410,7 @@ function saveSubjectQuestion(draft, modal, form) {
   const subject = draft.subjects.find((item) => item.id === modal.subjectId);
   if (!subject) return;
   if (!subject.qa) subject.qa = [];
-  const item = { id: modal.item?.id || createId("qa"), question: form.question, answer: form.answer, status: form.status || "pendiente" };
+  const item = { ...(modal.item || {}), id: modal.item?.id || createId("qa"), question: form.question, answer: form.answer, status: form.status || "pendiente" };
   const index = subject.qa.findIndex((entry) => entry.id === item.id);
   if (index >= 0) subject.qa[index] = item;
   else subject.qa.push(item);
@@ -3333,7 +3705,7 @@ function ThemeSection({ title, icon: Icon, onAdd, children }) {
     <section className="rounded-lg border border-slate-900/10 bg-white p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 font-black"><Icon size={18} /> {title}</h2>
-        <IconButton icon={Plus} label="Añadir" onClick={onAdd} />
+        {onAdd && <IconButton icon={Plus} label="Añadir" onClick={onAdd} />}
       </div>
       {children}
     </section>
@@ -3368,15 +3740,14 @@ function StoredFileLink({ file, onPreview, onDelete }) {
 
   return (
     <div className="flex gap-3 rounded-lg border border-slate-900/10 bg-white p-2">
-      <a href={href || "#"} target="_blank" className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded bg-slate-100 text-xs font-black text-slate-500" rel="noreferrer">
+      <button type="button" onClick={onPreview} className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded bg-slate-100 text-xs font-black text-slate-500">
         {isImage && href ? <img src={href} alt={file.name} className="h-full w-full object-cover" /> : "PDF"}
-      </a>
+      </button>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-black">{file.name}</p>
         <p className="mt-1 text-xs font-bold uppercase text-slate-400">{file.type === "pdf" ? "PDF" : "Imagen"}</p>
         <div className="mt-2 flex gap-2">
-          <button type="button" onClick={onPreview} className="rounded bg-slate-100 px-2 py-1 text-xs font-black text-slate-700">Vista</button>
-          <a href={href || "#"} target="_blank" rel="noreferrer" className="rounded bg-slate-100 px-2 py-1 text-xs font-black text-slate-700">Abrir</a>
+          <button type="button" onClick={onPreview} className="rounded bg-slate-100 px-2 py-1 text-xs font-black text-slate-700">{file.type === "pdf" ? "Leer" : "Vista"}</button>
           <button type="button" onClick={onDelete} className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-700">Borrar</button>
         </div>
       </div>
