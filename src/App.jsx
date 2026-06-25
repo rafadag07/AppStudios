@@ -2251,6 +2251,7 @@ function PomodoroPage({ data }) {
   const [seconds, setSeconds] = useState(durations.study * 60);
   const [running, setRunning] = useState(false);
   const [notes, setNotes] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem(POMODORO_HISTORY_KEY) || "[]");
@@ -2328,6 +2329,7 @@ function PomodoroPage({ data }) {
   const completed = todayStudySessions.length;
   const progress = Math.min(100, Math.round((completed / 8) * 100));
   const totalStudyMinutesToday = todayStudySessions.reduce((sum, session) => sum + (session.duration || 0), 0);
+  const monthlyStats = useMemo(() => buildPomodoroMonthStats(history), [history]);
 
   return (
     <div className="rounded-lg border border-slate-900/10 bg-white p-5 shadow-soft md:p-6">
@@ -2369,7 +2371,9 @@ function PomodoroPage({ data }) {
           </section>
           <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="flex items-center gap-2 font-black"><Clock3 size={18} /> Historial</h2>
+              <button type="button" onClick={() => setHistoryOpen(true)} className="flex items-center gap-2 font-black hover:text-[#1f5d55]">
+                <Clock3 size={18} /> Historial
+              </button>
               {history.length > 0 && (
                 <button type="button" onClick={clearPomodoroHistory} className="text-xs font-black text-red-500 hover:text-red-700">
                   Borrar todo
@@ -2449,6 +2453,15 @@ function PomodoroPage({ data }) {
           </div>
         </section>
       </div>
+      {historyOpen && (
+        <PomodoroHistoryModal
+          history={history}
+          stats={monthlyStats}
+          onClose={() => setHistoryOpen(false)}
+          onDelete={deletePomodoroSession}
+          onClear={clearPomodoroHistory}
+        />
+      )}
     </div>
   );
 }
@@ -2458,6 +2471,147 @@ function StatRow({ label, value }) {
     <div className="flex items-center justify-between border-b border-slate-100 py-3 last:border-b-0">
       <span className="text-sm font-bold text-slate-500">{label}</span>
       <span className="max-w-[52%] truncate text-right text-sm font-black text-[#172033]">{value}</span>
+    </div>
+  );
+}
+
+function buildPomodoroMonthStats(history) {
+  const now = new Date();
+  const month = now.getMonth();
+  const year = now.getFullYear();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const days = Array.from({ length: daysInMonth }, (_, index) => {
+    const day = index + 1;
+    const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return { key, day, study: 0, breaks: 0, total: 0, sessions: 0 };
+  });
+  const byKey = Object.fromEntries(days.map((day) => [day.key, day]));
+  history.forEach((session) => {
+    if (!session.createdAt) return;
+    const date = new Date(session.createdAt);
+    if (date.getMonth() !== month || date.getFullYear() !== year) return;
+    const key = session.createdAt.slice(0, 10);
+    const row = byKey[key];
+    if (!row) return;
+    const minutes = session.duration || 0;
+    if (session.mode === "study") row.study += minutes;
+    else row.breaks += minutes;
+    row.total += minutes;
+    row.sessions += 1;
+  });
+  const activeDays = days.filter((day) => day.total > 0);
+  return {
+    monthLabel: now.toLocaleDateString("es-ES", { month: "long", year: "numeric" }),
+    days,
+    rows: activeDays.reverse(),
+    maxTotal: Math.max(1, ...days.map((day) => day.total)),
+    totalStudy: days.reduce((sum, day) => sum + day.study, 0),
+    totalBreaks: days.reduce((sum, day) => sum + day.breaks, 0),
+    totalSessions: days.reduce((sum, day) => sum + day.sessions, 0),
+    activeDays: activeDays.length,
+  };
+}
+
+function PomodoroHistoryModal({ history, stats, onClose, onDelete, onClear }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+      <section className="max-h-[90vh] w-full max-w-5xl overflow-auto rounded-lg bg-white p-5 shadow-2xl md:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Historial de Pomodoro</p>
+            <h2 className="mt-1 text-3xl font-black">Resumen de {stats.monthLabel}</h2>
+          </div>
+          <div className="flex gap-2">
+            {history.length > 0 && <button onClick={onClear} className="h-10 rounded-lg bg-red-50 px-3 text-sm font-black text-red-600">Borrar todo</button>}
+            <IconButton icon={X} label="Cerrar" onClick={onClose} />
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-4">
+          <HistoryMetric label="Tiempo estudiado" value={`${stats.totalStudy} min`} />
+          <HistoryMetric label="Descansos" value={`${stats.totalBreaks} min`} />
+          <HistoryMetric label="Sesiones" value={stats.totalSessions} />
+          <HistoryMetric label="Dias activos" value={stats.activeDays} />
+        </div>
+
+        <div className="mt-5 rounded-lg border border-slate-900/10 bg-slate-50 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-black">Actividad diaria del mes</h3>
+            <div className="flex gap-3 text-xs font-black text-slate-500">
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#1f5d55]" /> Estudio</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#f4c36b]" /> Descanso</span>
+            </div>
+          </div>
+          <div className="mt-4 flex h-44 items-end gap-1 overflow-x-auto pb-2">
+            {stats.days.map((day) => {
+              const studyHeight = Math.max(2, Math.round((day.study / stats.maxTotal) * 100));
+              const breakHeight = Math.max(0, Math.round((day.breaks / stats.maxTotal) * 100));
+              return (
+                <div key={day.key} className="flex min-w-7 flex-col items-center justify-end gap-1">
+                  <div className="flex h-32 w-4 flex-col justify-end overflow-hidden rounded-full bg-white shadow-inner" title={`${day.key}: ${day.study} min estudio, ${day.breaks} min descanso`}>
+                    {day.breaks > 0 && <span className="block w-full bg-[#f4c36b]" style={{ height: `${breakHeight}%` }} />}
+                    {day.study > 0 && <span className="block w-full bg-[#1f5d55]" style={{ height: `${studyHeight}%` }} />}
+                  </div>
+                  <span className="text-[10px] font-black text-slate-400">{day.day}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_0.9fr]">
+          <section className="rounded-lg border border-slate-900/10 bg-white p-4">
+            <h3 className="font-black">Tabla por dia</h3>
+            <div className="mt-3 max-h-72 overflow-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 bg-white text-xs uppercase text-slate-400">
+                  <tr><th className="py-2">Dia</th><th>Estudio</th><th>Descanso</th><th>Sesiones</th></tr>
+                </thead>
+                <tbody>
+                  {stats.rows.length === 0 ? (
+                    <tr><td colSpan="4" className="py-6 text-center font-bold text-slate-400">Sin sesiones este mes.</td></tr>
+                  ) : stats.rows.map((row) => (
+                    <tr key={row.key} className="border-t border-slate-100">
+                      <td className="py-2 font-black">{new Date(`${row.key}T12:00:00`).toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}</td>
+                      <td className="font-bold text-[#1f5d55]">{row.study} min</td>
+                      <td className="font-bold text-amber-600">{row.breaks} min</td>
+                      <td className="font-bold text-slate-600">{row.sessions}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-slate-900/10 bg-white p-4">
+            <h3 className="font-black">Sesiones recientes</h3>
+            <div className="mt-3 max-h-72 space-y-2 overflow-auto pr-1">
+              {history.slice(0, 20).map((session) => (
+                <div key={session.id} className="flex items-start gap-3 rounded-lg bg-slate-50 p-3">
+                  <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${session.mode === "study" ? "bg-emerald-500" : "bg-amber-500"}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-black">{session.subjectName}</p>
+                    <p className="text-xs font-bold text-slate-500">{session.modeLabel} · {session.duration} min</p>
+                    <p className="text-xs font-semibold text-slate-400">{new Date(session.createdAt).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
+                  </div>
+                  <button type="button" onClick={() => onDelete(session.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white text-red-500 shadow-sm hover:bg-red-50">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function HistoryMetric({ label, value }) {
+  return (
+    <div className="rounded-lg bg-slate-50 p-4">
+      <p className="text-sm font-bold text-slate-500">{label}</p>
+      <p className="mt-1 text-2xl font-black text-[#172033]">{value}</p>
     </div>
   );
 }
