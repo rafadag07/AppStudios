@@ -74,6 +74,7 @@ const statuses = ["nada", "medio", "estudiado"];
 const priorities = ["baja", "media", "alta"];
 const resourceTypes = ["link", "pdf", "video", "libro", "otro"];
 const SYNC_CODE_KEY = "summer-study-campus-sync-code";
+const POMODORO_HISTORY_KEY = "appstudios-pomodoro-history-v1";
 const subjectSections = [
   { id: "teoria", label: "Teoría" },
   { id: "seminarios", label: "Seminarios" },
@@ -2250,7 +2251,13 @@ function PomodoroPage({ data }) {
   const [seconds, setSeconds] = useState(durations.study * 60);
   const [running, setRunning] = useState(false);
   const [notes, setNotes] = useState("");
-  const [completed, setCompleted] = useState(0);
+  const [history, setHistory] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(POMODORO_HISTORY_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  });
   const selectedSubject = data.subjects.find((subject) => subject.id === selectedSubjectId);
   const modeMeta = {
     study: { label: "Estudio", icon: BookOpen },
@@ -2271,10 +2278,34 @@ function PomodoroPage({ data }) {
     });
     setRunning(false);
   };
+  useEffect(() => {
+    localStorage.setItem(POMODORO_HISTORY_KEY, JSON.stringify(history));
+  }, [history]);
+  const savePomodoroSession = (fullDuration = false) => {
+    const duration = fullDuration ? durations[mode] : Math.max(1, durations[mode] - Math.ceil(seconds / 60));
+    const session = {
+      id: createId("pomodoro"),
+      mode,
+      modeLabel: modeMeta[mode].label,
+      subjectId: selectedSubject?.id || null,
+      subjectName: selectedSubject?.name || "Sin asignatura",
+      duration,
+      notes: notes.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    setHistory((current) => [session, ...current].slice(0, 150));
+  };
   const finishSession = () => {
     setRunning(false);
-    if (mode === "study") setCompleted((value) => value + 1);
+    savePomodoroSession(false);
     setSeconds(durations[mode] * 60);
+  };
+  const deletePomodoroSession = (sessionId) => {
+    setHistory((current) => current.filter((session) => session.id !== sessionId));
+  };
+  const clearPomodoroHistory = () => {
+    if (!window.confirm("Borrar todo el historial de pomodoros?")) return;
+    setHistory([]);
   };
   useEffect(() => {
     if (!running) return undefined;
@@ -2282,17 +2313,21 @@ function PomodoroPage({ data }) {
       setSeconds((value) => {
         if (value <= 1) {
           setRunning(false);
-          if (mode === "study") setCompleted((current) => current + 1);
+          savePomodoroSession(true);
           return 0;
         }
         return value - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [running, mode]);
+  }, [running, mode, selectedSubjectId, notes, durations, seconds]);
   const mins = String(Math.floor(seconds / 60)).padStart(2, "0");
   const secs = String(seconds % 60).padStart(2, "0");
+  const todayKey = todayIso();
+  const todayStudySessions = history.filter((session) => session.mode === "study" && session.createdAt?.startsWith(todayKey));
+  const completed = todayStudySessions.length;
   const progress = Math.min(100, Math.round((completed / 8) * 100));
+  const totalStudyMinutesToday = todayStudySessions.reduce((sum, session) => sum + (session.duration || 0), 0);
 
   return (
     <div className="rounded-lg border border-slate-900/10 bg-white p-5 shadow-soft md:p-6">
@@ -2329,7 +2364,38 @@ function PomodoroPage({ data }) {
           <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
             <StatRow label="Pomodoros hoy" value={completed} />
             <StatRow label="Asignatura activa" value={selectedSubject?.name || "Sin asignatura"} />
+            <StatRow label="Tiempo estudiado hoy" value={`${totalStudyMinutesToday} min`} />
             <StatRow label="Tiempo actual" value={`${durations[mode]} min`} />
+          </section>
+          <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 font-black"><Clock3 size={18} /> Historial</h2>
+              {history.length > 0 && (
+                <button type="button" onClick={clearPomodoroHistory} className="text-xs font-black text-red-500 hover:text-red-700">
+                  Borrar todo
+                </button>
+              )}
+            </div>
+            {history.length === 0 ? (
+              <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-400">Todavia no hay sesiones guardadas.</p>
+            ) : (
+              <div className="mt-3 max-h-72 space-y-2 overflow-auto pr-1">
+                {history.slice(0, 12).map((session) => (
+                  <div key={session.id} className="flex items-start gap-3 rounded-lg bg-slate-50 p-3">
+                    <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${session.mode === "study" ? "bg-emerald-500" : "bg-amber-500"}`} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-black text-[#172033]">{session.subjectName}</p>
+                      <p className="text-xs font-bold text-slate-500">{session.modeLabel} · {session.duration} min</p>
+                      <p className="text-xs font-semibold text-slate-400">{new Date(session.createdAt).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
+                      {session.notes && <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-500">{session.notes}</p>}
+                    </div>
+                    <button type="button" onClick={() => deletePomodoroSession(session.id)} title="Borrar sesion" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white text-red-500 shadow-sm hover:bg-red-50">
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         </div>
 
