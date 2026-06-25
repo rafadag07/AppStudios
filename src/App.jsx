@@ -1188,6 +1188,14 @@ function ThemePage({ subject, theme, openModal, updateData, setView, syncStatus 
     });
   };
 
+  const deleteReviewLater = (reviewId) => {
+    updateData((draft) => {
+      const target = findTheme(draft, subject.id, theme.id);
+      target.reviewLater = (target.reviewLater || []).filter((item) => item.id !== reviewId);
+      return draft;
+    });
+  };
+
   return (
     <div className="space-y-5">
       <button onClick={() => setView({ page: "subject", subjectId: subject.id })} className="flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-slate-900">
@@ -1240,16 +1248,20 @@ function ThemePage({ subject, theme, openModal, updateData, setView, syncStatus 
               </div>
             )}
           </ThemeSection>
-          <ThemeSection title="Revisar mÃ¡s tarde" icon={Clock3}>
+          <ThemeSection title="Revisar más tarde" icon={Clock3}>
             {(theme.reviewLater || []).length === 0 ? (
-              <div className="rounded-lg bg-slate-50 p-4 text-sm font-bold text-slate-500">No hay fragmentos marcados todavÃ­a.</div>
+              <div className="rounded-lg bg-slate-50 p-4 text-sm font-bold text-slate-500">No hay fragmentos marcados todavía.</div>
             ) : (
               <div className="space-y-2">
                 {(theme.reviewLater || []).map((item) => (
                   <div key={item.id} className="rounded-lg bg-slate-50 p-3 text-sm">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <span className="text-xs font-black uppercase tracking-[0.12em] text-slate-400">Fragmento</span>
+                      <button type="button" onClick={() => deleteReviewLater(item.id)} className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">Borrar</button>
+                    </div>
                     {item.imageDataUrl && <img src={item.imageDataUrl} alt="" className="mb-2 max-h-40 w-full rounded-lg object-contain bg-white" />}
                     <p className="line-clamp-3 font-semibold text-slate-700">{item.text}</p>
-                    <p className="mt-2 text-xs font-black uppercase text-slate-400">{item.pdfName} · pÃ¡gina {item.page}</p>
+                    <p className="mt-2 text-xs font-black uppercase text-slate-400">{item.pdfName} - página {item.page}</p>
                   </div>
                 ))}
               </div>
@@ -1349,6 +1361,7 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
   const [search, setSearch] = useState("");
   const [pageTexts, setPageTexts] = useState([]);
   const [selection, setSelection] = useState(null);
+  const [cropMode, setCropMode] = useState(false);
   const [questionDraft, setQuestionDraft] = useState(null);
   const [answerError, setAnswerError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1505,6 +1518,25 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
     setQuestionDraft(null);
   };
 
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (questionDraft) return;
+      const target = event.target;
+      const isTyping = ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName) || target?.isContentEditable;
+      if (isTyping) return;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setPageNumber((value) => Math.max(1, value - 1));
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setPageNumber((value) => Math.min(pdfDoc?.numPages || value, value + 1));
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [pdfDoc?.numPages, questionDraft]);
+
   return (
     <div className="space-y-4">
       <section className="sticky top-0 z-30 rounded-lg border border-slate-900/10 bg-white/95 p-4 shadow-soft backdrop-blur">
@@ -1523,6 +1555,7 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
             <button onClick={() => setZoom((value) => Math.max(0.65, Number((value - 0.1).toFixed(2))))} className="h-10 rounded-lg bg-slate-100 px-3 font-black">-</button>
             <span className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-black">{Math.round(zoom * 100)}%</span>
             <button onClick={() => setZoom((value) => Math.min(2.4, Number((value + 0.1).toFixed(2))))} className="h-10 rounded-lg bg-slate-100 px-3 font-black">+</button>
+            <button onClick={() => setCropMode((value) => !value)} className={`h-10 rounded-lg px-3 text-sm font-black ${cropMode ? "bg-[#172033] text-white" : "bg-slate-100 text-slate-700"}`}>Recorte</button>
           </div>
         </div>
         <div className="mt-3 flex gap-2">
@@ -1540,15 +1573,18 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
             pageNumber={pageNumber}
             zoom={zoom}
             search={search}
-            onSelection={(nextSelection) => setSelection(nextSelection)}
+            cropMode={cropMode}
+            onSelection={(nextSelection) => {
+              setSelection(nextSelection);
+              if (nextSelection?.imageDataUrl) setCropMode(false);
+            }}
           />
         )}
         {selection && (
           <div className="fixed z-50 flex max-w-[calc(100vw-2rem)] flex-wrap gap-2 rounded-lg border border-slate-900/10 bg-white p-2 shadow-2xl" style={{ left: selection.x, top: selection.y }}>
             <button onClick={openQuestionModal} className="rounded bg-[#172033] px-3 py-2 text-xs font-black text-white">Crear pregunta</button>
-            <button onClick={markForReview} className="rounded bg-amber-50 px-3 py-2 text-xs font-black text-amber-700">Revisar mas tarde</button>
+            <button onClick={markForReview} className="rounded bg-amber-50 px-3 py-2 text-xs font-black text-amber-700">Revisar más tarde</button>
             <button onClick={addTextToNotes} className="rounded bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700">Añadir a apuntes</button>
-            <button onClick={addDoubt} className="rounded bg-rose-50 px-3 py-2 text-xs font-black text-rose-700">Añadir duda</button>
           </div>
         )}
       </section>
@@ -1598,12 +1634,13 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
   );
 }
 
-function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, onSelection }) {
+function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, cropMode, onSelection }) {
   const canvasRef = useRef(null);
   const layerRef = useRef(null);
   const pageRef = useRef(null);
   const dragStartRef = useRef(null);
   const [rendering, setRendering] = useState(true);
+  const [cropPreview, setCropPreview] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1653,21 +1690,29 @@ function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, onSelection }) {
 
   const handleMouseDown = (event) => {
     dragStartRef.current = { x: event.clientX, y: event.clientY };
+    setCropPreview(null);
     layerRef.current?.classList.add("selecting");
     onSelection(null);
+  };
+
+  const handleMouseMove = (event) => {
+    if (!cropMode || !dragStartRef.current || event.buttons !== 1) return;
+    const rect = getPdfDragRect(dragStartRef.current, { x: event.clientX, y: event.clientY }, pageRef.current);
+    setCropPreview(rect);
   };
 
   const handleMouseUp = (event) => {
     window.setTimeout(() => {
       layerRef.current?.classList.remove("selecting");
+      setCropPreview(null);
       const rangeSelection = window.getSelection();
       const hasRange = rangeSelection && rangeSelection.rangeCount > 0;
       const anchorInside = hasRange && pageRef.current?.contains(rangeSelection.anchorNode);
       const focusInside = hasRange && pageRef.current?.contains(rangeSelection.focusNode);
       const range = hasRange && anchorInside && focusInside ? rangeSelection.getRangeAt(0) : null;
-      const text = range ? reconstructPdfSelectionText(range, layerRef.current) : "";
+      const text = cropMode ? "" : range ? reconstructPdfSelectionText(range, layerRef.current) : "";
       const dragRect = getPdfDragRect(dragStartRef.current, { x: event.clientX, y: event.clientY }, pageRef.current);
-      const imageDataUrl = !text.trim() && dragRect ? cropPdfCanvasSelection(canvasRef.current, pageRef.current, dragRect) : "";
+      const imageDataUrl = (cropMode || !text.trim()) && dragRect ? cropPdfCanvasSelection(canvasRef.current, pageRef.current, dragRect) : "";
       if (!text.trim() && !imageDataUrl) {
         onSelection(null);
         return;
@@ -1687,6 +1732,7 @@ function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, onSelection }) {
       <div
         ref={pageRef}
         onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         className="pdf-page-shell relative mx-auto w-max rounded bg-white shadow-soft"
         style={{ "--scale-factor": zoom, "--total-scale-factor": zoom }}
@@ -1694,6 +1740,12 @@ function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, onSelection }) {
         {rendering && <div className="absolute inset-0 z-20 grid place-items-center rounded bg-white/70 text-sm font-black text-slate-500">Renderizando...</div>}
         <canvas ref={canvasRef} className="block pointer-events-none select-none" />
         <div ref={layerRef} className="pdf-text-layer textLayer absolute inset-0" />
+        {cropMode && cropPreview && (
+          <div
+            className="pointer-events-none fixed z-40 rounded border-2 border-emerald-500 bg-emerald-300/20 shadow-[0_0_0_9999px_rgba(15,23,42,0.12)]"
+            style={{ left: cropPreview.left, top: cropPreview.top, width: cropPreview.width, height: cropPreview.height }}
+          />
+        )}
       </div>
     </div>
   );
@@ -2101,7 +2153,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
       saveSelection();
       return;
     }
-    const block = event.target?.closest?.("[data-study-block], .study-block, .study-code-block");
+    const block = event.target?.closest?.("[data-study-block], .study-block, .study-code-block, blockquote, .pdf-selection-note");
     if (block && editorRef.current?.contains(block)) {
       selectedImage?.classList.remove("selected-editor-image");
       selectedBlock?.classList.remove("selected-study-block");
