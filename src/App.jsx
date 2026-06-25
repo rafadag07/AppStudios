@@ -586,28 +586,29 @@ function Dashboard({ data, stats, allThemes, setView, openModal, updateData, que
 
   return (
     <div className="space-y-6">
-      <section className="grid gap-4 lg:grid-cols-[1.45fr_0.55fr]">
-        <div className="overflow-hidden rounded-lg bg-[#172033] text-white shadow-soft">
-          <div className="grid gap-6 p-6 md:grid-cols-[1fr_260px] md:p-8">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#f4c36b]">Dashboard principal</p>
-              <h1 className="mt-3 max-w-2xl text-4xl font-black leading-tight md:text-6xl">AppStudios</h1>
-              <p className="mt-4 max-w-xl text-base text-white/70">
-                Un espacio visual para moverte de asignaturas a temas, trabajar apuntes y mantener visible lo próximo.
-              </p>
-              <div className="mt-6 flex flex-wrap gap-2">
-                <ActionButton icon={Plus} label="Nueva asignatura" onClick={() => openModal({ type: "subject" })} />
-                <ActionButton icon={ListChecks} label="Nueva tarea" onClick={() => openModal({ type: "task" })} />
-                <ActionButton icon={LinkIcon} label="Nuevo recurso" onClick={() => openModal({ type: "resource" })} />
-              </div>
-            </div>
-            <div className="grid content-end gap-3">
-              <Metric label="Tareas pendientes" value={stats.pendingTasks} />
-              <Metric label="Temas completados" value={`${stats.completedThemes}/${stats.totalThemes}`} />
+      <section className="relative min-h-[560px] overflow-hidden rounded-lg bg-cover bg-center shadow-soft" style={{ backgroundImage: "url('/appstudios-dashboard.png')" }}>
+        <div className="absolute inset-0 bg-gradient-to-r from-sky-950/20 via-transparent to-emerald-950/10" />
+        <div className="relative grid min-h-[560px] content-center gap-5 p-5 md:p-8 xl:grid-cols-[1.05fr_0.95fr]">
+          <div className="rounded-lg border border-white/55 bg-sky-900/24 p-6 text-white shadow-soft backdrop-blur-md md:p-8">
+            <p className="text-sm font-bold uppercase tracking-[0.22em] text-[#1f5d55]">Dashboard principal</p>
+            <h1 className="mt-3 max-w-2xl text-4xl font-black leading-tight drop-shadow md:text-6xl">AppStudios</h1>
+            <div className="mt-5 h-1 w-16 rounded-full bg-emerald-300" />
+            <p className="mt-6 max-w-xl text-base font-semibold leading-relaxed text-white md:text-xl">
+              Organiza tus asignaturas, apunta mejor y avanza paso a paso hasta tu meta.
+            </p>
+            <div className="mt-10 grid gap-3 sm:grid-cols-3">
+              <DashboardAction icon={BookOpen} label="Nueva asignatura" tone="green" onClick={() => openModal({ type: "subject" })} />
+              <DashboardAction icon={ListChecks} label="Nueva tarea" tone="blue" onClick={() => openModal({ type: "task" })} />
+              <DashboardAction icon={Paperclip} label="Nuevo recurso" tone="purple" onClick={() => openModal({ type: "resource" })} />
             </div>
           </div>
+          <div className="grid content-center gap-4 sm:grid-cols-2">
+            <DashboardStat icon={ListChecks} label="Tareas pendientes" value={stats.pendingTasks} accent="bg-blue-500" iconClass="bg-blue-50 text-blue-600" />
+            <DashboardStat icon={BookOpen} label="Temas completados" value={`${stats.completedThemes}/${stats.totalThemes}`} accent="bg-emerald-500" iconClass="bg-emerald-50 text-emerald-600" />
+            <DashboardStat icon={Network} label="Asignaturas" value={data.subjects.length} accent="bg-amber-500" iconClass="bg-amber-50 text-amber-600" />
+            <DashboardStat icon={LinkIcon} label="Recursos" value={data.resources.length} accent="bg-violet-500" iconClass="bg-violet-50 text-violet-600" />
+          </div>
         </div>
-        <PomodoroCard />
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -2861,6 +2862,32 @@ function ColorIcon({ subject, light = false }) {
 
 function Metric({ label, value }) {
   return <div className="rounded-lg bg-white/10 p-4"><p className="text-sm text-white/60">{label}</p><p className="mt-1 text-3xl font-black">{value}</p></div>;
+}
+
+function DashboardAction({ icon: Icon, label, tone, onClick }) {
+  const toneClass = {
+    green: "text-emerald-700 ring-emerald-200/80 hover:bg-emerald-50",
+    blue: "text-blue-700 ring-blue-200/80 hover:bg-blue-50",
+    purple: "text-violet-700 ring-violet-200/80 hover:bg-violet-50",
+  }[tone] || "text-slate-800 ring-slate-200 hover:bg-slate-50";
+  return (
+    <button onClick={onClick} className={`inline-flex h-16 items-center justify-center gap-3 rounded-lg bg-white/88 px-4 text-sm font-black shadow-sm ring-1 backdrop-blur transition ${toneClass}`}>
+      <Icon size={24} /> {label}
+    </button>
+  );
+}
+
+function DashboardStat({ icon: Icon, label, value, accent, iconClass }) {
+  return (
+    <article className="min-h-44 rounded-lg border border-white/55 bg-white/40 p-5 text-[#10213d] shadow-soft backdrop-blur-md">
+      <span className={`grid h-14 w-14 place-items-center rounded-full shadow-sm ${iconClass}`}>
+        <Icon size={26} />
+      </span>
+      <p className="mt-6 text-base font-black text-slate-700">{label}</p>
+      <span className={`mt-3 block h-1 w-7 rounded-full ${accent}`} />
+      <p className="mt-4 text-4xl font-black">{value}</p>
+    </article>
+  );
 }
 
 function ActionButton({ icon: Icon, label, onClick }) {
