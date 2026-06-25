@@ -33,13 +33,18 @@ import {
   Minimize2,
   Network,
   Paperclip,
+  Pause,
   Pencil,
+  Play,
   Plus,
   Quote,
+  RotateCcw,
   Save,
   Search,
   Sigma,
   Sparkles,
+  Square,
+  Target,
   Trash2,
   Underline,
   Upload,
@@ -333,7 +338,7 @@ function App() {
         {view.page === "schedule" && <SchedulePage data={data} openModal={setModal} updateData={updateData} />}
         {view.page === "tasks" && <TasksPage data={data} openModal={setModal} updateData={updateData} />}
         {view.page === "resources" && <ResourcesPage data={data} openModal={setModal} updateData={updateData} />}
-        {view.page === "pomodoro" && <PomodoroPage />}
+        {view.page === "pomodoro" && <PomodoroPage data={data} />}
       </Shell>
 
       {modal && <EditorModal modal={modal} close={() => setModal(null)} data={data} updateData={updateData} />}
@@ -2238,10 +2243,169 @@ function ResourcesPage({ data, openModal, updateData }) {
   );
 }
 
-function PomodoroPage() {
+function PomodoroPage({ data }) {
+  const [selectedSubjectId, setSelectedSubjectId] = useState(data.subjects[0]?.id || "");
+  const [mode, setMode] = useState("study");
+  const [durations, setDurations] = useState({ study: 25, short: 5, long: 15 });
+  const [seconds, setSeconds] = useState(durations.study * 60);
+  const [running, setRunning] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [completed, setCompleted] = useState(0);
+  const selectedSubject = data.subjects.find((subject) => subject.id === selectedSubjectId);
+  const modeMeta = {
+    study: { label: "Estudio", icon: BookOpen },
+    short: { label: "Descanso corto", icon: Clock3 },
+    long: { label: "Descanso largo", icon: AlarmClock },
+  };
+  const changeMode = (nextMode) => {
+    setMode(nextMode);
+    setRunning(false);
+    setSeconds(durations[nextMode] * 60);
+  };
+  const updateDuration = (key, delta) => {
+    setDurations((current) => {
+      const nextValue = Math.max(1, Math.min(90, current[key] + delta));
+      const next = { ...current, [key]: nextValue };
+      if (key === mode) setSeconds(nextValue * 60);
+      return next;
+    });
+    setRunning(false);
+  };
+  const finishSession = () => {
+    setRunning(false);
+    if (mode === "study") setCompleted((value) => value + 1);
+    setSeconds(durations[mode] * 60);
+  };
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = setInterval(() => {
+      setSeconds((value) => {
+        if (value <= 1) {
+          setRunning(false);
+          if (mode === "study") setCompleted((current) => current + 1);
+          return 0;
+        }
+        return value - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [running, mode]);
+  const mins = String(Math.floor(seconds / 60)).padStart(2, "0");
+  const secs = String(seconds % 60).padStart(2, "0");
+  const progress = Math.min(100, Math.round((completed / 8) * 100));
+
   return (
-    <div className="mx-auto max-w-xl">
-      <PomodoroCard full />
+    <div className="rounded-lg border border-slate-900/10 bg-white p-5 shadow-soft md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <span className="grid h-14 w-14 place-items-center rounded-lg bg-[#f4c36b] text-[#172033] shadow-sm"><AlarmClock size={28} /></span>
+          <div>
+            <h1 className="text-3xl font-black">Pomodoro</h1>
+            <p className="text-sm font-semibold text-slate-500">Sesion enfocada</p>
+          </div>
+        </div>
+        <span className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-900/10 bg-slate-50 px-3 text-sm font-black text-slate-600">
+          <Target size={17} /> Modo enfoque
+        </span>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-[0.72fr_1.35fr_0.8fr]">
+        <div className="space-y-4">
+          <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
+            <label className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Asignatura</label>
+            <div className="mt-2 flex items-center gap-3">
+              <BookOpen size={20} className="text-slate-500" />
+              <select value={selectedSubjectId} onChange={(event) => setSelectedSubjectId(event.target.value)} className="min-w-0 flex-1 bg-transparent text-base font-black outline-none">
+                {data.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
+              </select>
+            </div>
+          </section>
+          <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
+            <h2 className="flex items-center gap-2 font-black"><Target size={18} className="text-amber-500" /> Objetivo diario</h2>
+            <p className="mt-4 text-2xl font-black">{completed} <span className="text-base text-slate-400">/ 8 pomodoros</span></p>
+            <div className="mt-3 h-2 rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#f4c36b]" style={{ width: `${progress}%` }} /></div>
+            <p className="mt-2 text-sm font-bold text-slate-400">{progress}% completado</p>
+          </section>
+          <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
+            <StatRow label="Pomodoros hoy" value={completed} />
+            <StatRow label="Asignatura activa" value={selectedSubject?.name || "Sin asignatura"} />
+            <StatRow label="Tiempo actual" value={`${durations[mode]} min`} />
+          </section>
+        </div>
+
+        <div className="space-y-4">
+          <section className="rounded-lg border border-slate-900/10 bg-white p-5 text-center shadow-sm">
+            <div className="grid gap-2 rounded-lg border border-slate-900/10 p-2 sm:grid-cols-3">
+              {Object.entries(modeMeta).map(([key, item]) => {
+                const Icon = item.icon;
+                const active = mode === key;
+                return (
+                  <button key={key} type="button" onClick={() => changeMode(key)} className={`inline-flex h-12 items-center justify-center gap-2 rounded-lg text-sm font-black transition ${active ? "bg-amber-50 text-[#172033] ring-1 ring-amber-300" : "text-slate-500 hover:bg-slate-50"}`}>
+                    <Icon size={18} /> {item.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="my-12 text-7xl font-black tracking-tight text-[#10182b] tabular-nums md:text-8xl">{mins}:{secs}</div>
+            <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-black text-slate-600">
+              <Target size={17} /> {modeMeta[mode].label}
+            </span>
+            <div className="mx-auto mt-4 max-w-sm rounded-lg bg-slate-50 p-4 text-sm font-bold italic text-slate-500">
+              "La concentracion es la raiz de todas las capacidades del ser humano."
+            </div>
+            <div className="mt-8 grid gap-3 sm:grid-cols-4">
+              <button onClick={() => setRunning(true)} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#172033] text-sm font-black text-white"><Play size={18} /> Iniciar</button>
+              <button onClick={() => setRunning(false)} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-slate-100 text-sm font-black text-slate-700"><Pause size={18} /> Pausar</button>
+              <button onClick={() => { setRunning(false); setSeconds(durations[mode] * 60); }} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-slate-100 text-sm font-black text-slate-700"><RotateCcw size={18} /> Reiniciar</button>
+              <button onClick={finishSession} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 text-sm font-black text-red-600"><Square size={16} /> Finalizar</button>
+            </div>
+          </section>
+          <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="font-black">Configuracion de tiempos</h2>
+              <button onClick={() => { setDurations({ study: 25, short: 5, long: 15 }); setSeconds(25 * 60); setMode("study"); setRunning(false); }} className="text-sm font-black text-slate-400">Restablecer</button>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <DurationControl label="Estudio" value={durations.study} onMinus={() => updateDuration("study", -1)} onPlus={() => updateDuration("study", 1)} />
+              <DurationControl label="Descanso corto" value={durations.short} onMinus={() => updateDuration("short", -1)} onPlus={() => updateDuration("short", 1)} />
+              <DurationControl label="Descanso largo" value={durations.long} onMinus={() => updateDuration("long", -1)} onPlus={() => updateDuration("long", 1)} />
+            </div>
+          </section>
+        </div>
+
+        <section className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
+          <h2 className="font-black">Notas rapidas</h2>
+          <textarea value={notes} onChange={(event) => setNotes(event.target.value.slice(0, 500))} className="mt-4 min-h-[260px] w-full rounded-lg border border-slate-900/10 bg-slate-50 p-3 text-sm font-semibold outline-none focus:ring-4 focus:ring-[#2f6f73]/15" placeholder="Escribe tus ideas, dudas o apuntes rapidos aqui..." />
+          <p className="mt-2 text-sm font-bold text-slate-400">{notes.length} / 500 caracteres</p>
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-slate-700">
+            <p className="font-black">Consejo</p>
+            <p className="mt-1 font-semibold">Escribe ideas clave durante la sesion para repasarlas despues.</p>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function StatRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between border-b border-slate-100 py-3 last:border-b-0">
+      <span className="text-sm font-bold text-slate-500">{label}</span>
+      <span className="max-w-[52%] truncate text-right text-sm font-black text-[#172033]">{value}</span>
+    </div>
+  );
+}
+
+function DurationControl({ label, value, onMinus, onPlus }) {
+  return (
+    <div className="rounded-lg border border-slate-900/10 bg-slate-50 p-3 text-center">
+      <p className="text-sm font-black text-slate-600">{label}</p>
+      <p className="mt-2 text-3xl font-black text-[#172033]">{value}</p>
+      <p className="text-xs font-bold text-slate-400">minutos</p>
+      <div className="mt-3 flex justify-center gap-2">
+        <button type="button" onClick={onMinus} className="grid h-8 w-8 place-items-center rounded-lg bg-white text-lg font-black shadow-sm">-</button>
+        <button type="button" onClick={onPlus} className="grid h-8 w-8 place-items-center rounded-lg bg-white text-lg font-black shadow-sm">+</button>
+      </div>
     </div>
   );
 }
