@@ -47,21 +47,36 @@ select {
 
 .pdf-page-shell {
   --scale-factor: 1;
+  --total-scale-factor: 1;
+  user-select: none;
 }
 
 .pdf-text-layer {
   z-index: 10;
   opacity: 1;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+  text-size-adjust: none;
+  -webkit-text-size-adjust: none;
 }
 
 .pdf-text-layer span {
   color: transparent;
   cursor: text;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  text-size-adjust: none;
+  -webkit-text-size-adjust: none;
 }
 
 .pdf-text-layer ::selection,
 .pdf-text-layer::selection {
   background: rgba(47, 111, 115, 0.28);
+}
+
+.pdf-text-layer.selecting {
+  cursor: text;
 }
 
 .pdf-text-layer .pdf-search-hit {

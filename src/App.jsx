@@ -1604,9 +1604,13 @@ function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, onSelection }) {
       context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
       renderTask = page.render({ canvasContext: context, viewport });
       await renderTask.promise;
-      const textContent = await page.getTextContent();
+      const textContent = await page.getTextContent({ disableNormalization: true });
       const textLayer = new pdfjsLib.TextLayer({ textContentSource: textContent, container: layer, viewport });
       await textLayer.render();
+      textLayer.textDivs.forEach((div) => {
+        div.style.userSelect = "text";
+        div.style.webkitUserSelect = "text";
+      });
       const cleanSearch = search.trim().toLowerCase();
       if (cleanSearch) {
         textLayer.textDivs.forEach((div) => {
@@ -1624,10 +1628,16 @@ function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, onSelection }) {
     };
   }, [pdfDoc, pageNumber, zoom, search]);
 
+  const handleMouseDown = () => {
+    layerRef.current?.classList.add("selecting");
+    onSelection(null);
+  };
+
   const handleMouseUp = () => {
     window.setTimeout(() => {
+      layerRef.current?.classList.remove("selecting");
       const rangeSelection = window.getSelection();
-      const text = rangeSelection?.toString().trim();
+      const text = rangeSelection?.toString().replace(/\s+\n/g, "\n").trim();
       if (!text || !pageRef.current) {
         onSelection(null);
         return;
@@ -1646,9 +1656,15 @@ function PdfPageCanvas({ pdfDoc, pageNumber, zoom, search, onSelection }) {
 
   return (
     <div className="overflow-auto">
-      <div ref={pageRef} onMouseUp={handleMouseUp} className="pdf-page-shell relative mx-auto w-max rounded bg-white shadow-soft" style={{ "--scale-factor": zoom }}>
+      <div
+        ref={pageRef}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+        className="pdf-page-shell relative mx-auto w-max rounded bg-white shadow-soft"
+        style={{ "--scale-factor": zoom, "--total-scale-factor": zoom }}
+      >
         {rendering && <div className="absolute inset-0 z-20 grid place-items-center rounded bg-white/70 text-sm font-black text-slate-500">Renderizando...</div>}
-        <canvas ref={canvasRef} className="block" />
+        <canvas ref={canvasRef} className="block pointer-events-none select-none" />
         <div ref={layerRef} className="pdf-text-layer textLayer absolute inset-0" />
       </div>
     </div>
