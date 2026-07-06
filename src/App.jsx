@@ -1640,11 +1640,6 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
   const selectedText = selection?.text || "";
   const selectedSnapshot = selection?.imageDataUrl || "";
   const hasSelectedContent = selectedText.trim() || selectedSnapshot;
-  const notePlacementOptions = useMemo(
-    () => getDocumentInsertionOptions(theme.documentHtml || buildThemeDocument(theme)),
-    [theme],
-  );
-
   const buildSelectedNoteContent = () => (
     selectedSnapshot
       ? `<p><img class="pdf-crop-image" data-pdf-source="${file.id}" data-pdf-page="${pageNumber}" src="${selectedSnapshot}" alt="Recorte de ${escapeHtml(file.name)}" /></p><p><br></p>`
@@ -1825,44 +1820,14 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
       </section>
 
       {notePlacement && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
-          <section className="max-h-[86vh] w-full max-w-4xl overflow-hidden rounded-lg bg-white shadow-2xl">
-            <div className="flex items-start justify-between gap-3 border-b border-slate-900/10 p-5">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">{subject.name} / {theme.name}</p>
-                <h2 className="mt-1 text-2xl font-black">Colocar en apuntes</h2>
-                <p className="mt-1 text-sm font-semibold text-slate-500">Elige donde quieres insertar el recorte sin salir del PDF.</p>
-              </div>
-              <IconButton icon={X} label="Cerrar" onClick={() => setNotePlacement(null)} />
-            </div>
-            <div className="grid gap-4 overflow-auto p-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="space-y-2">
-                {notePlacementOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => insertNoteContentAt(option.insertionIndex)}
-                    className="group w-full rounded-lg border border-slate-900/10 bg-slate-50 p-3 text-left transition hover:border-[#2f6f73]/40 hover:bg-emerald-50"
-                  >
-                    <span className="block text-sm font-black text-[#172033] group-hover:text-[#1f5d55]">{option.label}</span>
-                    <span className="mt-1 line-clamp-2 block text-xs font-bold text-slate-500">{option.detail}</span>
-                  </button>
-                ))}
-              </div>
-              <aside className="rounded-lg border border-slate-900/10 bg-white p-4 shadow-sm">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Vista previa</p>
-                {notePlacement.imageDataUrl ? (
-                  <img src={notePlacement.imageDataUrl} alt="" className="mt-3 max-h-72 w-full rounded-lg bg-slate-50 object-contain" />
-                ) : (
-                  <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-700">{notePlacement.text}</pre>
-                )}
-                <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700">
-                  Se insertara solo el contenido seleccionado. Si es recorte, no se anadira ningun texto debajo.
-                </p>
-              </aside>
-            </div>
-          </section>
-        </div>
+        <NotePlacementModal
+          subject={subject}
+          theme={theme}
+          documentHtml={theme.documentHtml || buildThemeDocument(theme)}
+          notePlacement={notePlacement}
+          onCancel={() => setNotePlacement(null)}
+          onInsert={insertNoteContentAt}
+        />
       )}
 
       {questionDraft && (
@@ -1906,6 +1871,125 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
           </section>
         </div>
       )}
+    </div>
+  );
+}
+
+function NotePlacementModal({ subject, theme, documentHtml, notePlacement, onCancel, onInsert }) {
+  const [dragging, setDragging] = useState(false);
+  const [dropTarget, setDropTarget] = useState(null);
+  const blocks = useMemo(() => getDocumentPlacementBlocks(documentHtml), [documentHtml]);
+
+  const getDropData = (event, block) => {
+    if (block.start || block.end) {
+      return {
+        id: block.id,
+        label: block.label,
+        insertionIndex: block.insertionIndex,
+        position: block.start ? "al principio" : "al final",
+      };
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const before = event.clientY < rect.top + rect.height / 2;
+    return {
+      id: block.id,
+      label: block.label,
+      insertionIndex: before ? block.beforeIndex : block.insertionIndex,
+      position: before ? "encima" : "debajo",
+    };
+  };
+
+  const handleDragOver = (event, block) => {
+    event.preventDefault();
+    setDropTarget(getDropData(event, block));
+  };
+
+  const handleDrop = (event, block) => {
+    event.preventDefault();
+    const target = getDropData(event, block);
+    onInsert(target.insertionIndex);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+      <section className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-900/10 p-5">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">{subject.name} / {theme.name}</p>
+            <h2 className="mt-1 text-2xl font-black">Colocar recorte en apuntes</h2>
+            <p className="mt-1 text-sm font-semibold text-slate-500">Arrastra el recorte sobre el apunte y sueltalo donde quieras insertarlo.</p>
+          </div>
+          <IconButton icon={X} label="Cerrar" onClick={onCancel} />
+        </div>
+        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden p-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+          <aside className="rounded-lg border border-slate-900/10 bg-slate-50 p-4">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Recorte</p>
+            {notePlacement.imageDataUrl ? (
+              <img
+                src={notePlacement.imageDataUrl}
+                alt=""
+                draggable
+                onDragStart={() => setDragging(true)}
+                onDragEnd={() => {
+                  setDragging(false);
+                  setDropTarget(null);
+                }}
+                className="mt-3 max-h-72 w-full cursor-grab rounded-lg border border-slate-900/10 bg-white object-contain p-2 shadow-sm active:cursor-grabbing"
+              />
+            ) : (
+              <pre
+                draggable
+                onDragStart={() => setDragging(true)}
+                onDragEnd={() => {
+                  setDragging(false);
+                  setDropTarget(null);
+                }}
+                className="mt-3 max-h-72 cursor-grab overflow-auto whitespace-pre-wrap rounded-lg border border-slate-900/10 bg-white p-3 text-sm font-bold text-slate-700 shadow-sm active:cursor-grabbing"
+              >
+                {notePlacement.text}
+              </pre>
+            )}
+            <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700">
+              Se insertara solo el recorte, sin texto ni descripcion debajo.
+            </p>
+            {dropTarget && (
+              <p className="mt-3 rounded-lg bg-[#172033] px-3 py-2 text-xs font-black text-white">
+                Soltar {dropTarget.position}: {dropTarget.label}
+              </p>
+            )}
+          </aside>
+          <div className="min-h-0 overflow-auto rounded-lg bg-[#f3efe6] p-4">
+            <div className="mx-auto max-w-3xl rounded bg-white p-5 shadow-soft md:p-8">
+              <div
+                onDragOver={(event) => handleDragOver(event, blocks[0])}
+                onDrop={(event) => handleDrop(event, blocks[0])}
+                className={`note-placement-zone ${dropTarget?.id === "start" ? "active" : ""}`}
+              >
+                Soltar al principio
+              </div>
+              {blocks.filter((block) => !block.start && !block.end).map((block) => (
+                <div
+                  key={block.id}
+                  onDragOver={(event) => handleDragOver(event, block)}
+                  onDrop={(event) => handleDrop(event, block)}
+                  className={`note-placement-block ${dragging ? "is-dragging" : ""} ${dropTarget?.id === block.id ? "active" : ""}`}
+                >
+                  {dropTarget?.id === block.id && dropTarget.position === "encima" && <div className="note-placement-line">Aqui</div>}
+                  <div className="study-document note-placement-preview" dangerouslySetInnerHTML={{ __html: block.html }} />
+                  {dropTarget?.id === block.id && dropTarget.position === "debajo" && <div className="note-placement-line">Aqui</div>}
+                </div>
+              ))}
+              <div
+                onDragOver={(event) => handleDragOver(event, blocks[blocks.length - 1])}
+                onDrop={(event) => handleDrop(event, blocks[blocks.length - 1])}
+                className={`note-placement-zone ${dropTarget?.id === "end" ? "active" : ""}`}
+              >
+                Soltar al final
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -2557,6 +2641,22 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
       saveSelection();
       saveDocument();
       return;
+    }
+
+    if ((event.key === "Backspace" || event.key === "Delete") && !codeContent) {
+      const topLevelBlock = getTopLevelEditorBlock(selection.anchorNode);
+      if (isEmptyEditorLine(topLevelBlock) && getIndentLevel(topLevelBlock) > 0) {
+        event.preventDefault();
+        applyBlockIndent(topLevelBlock, 0);
+        const range = document.createRange();
+        range.setStart(topLevelBlock, 0);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        savedRangeRef.current = range.cloneRange();
+        saveDocument();
+        return;
+      }
     }
 
     if (event.key !== "Tab") return;
@@ -4657,6 +4757,45 @@ function getDocumentInsertionOptions(html) {
     insertionIndex: children.length,
   });
   return options;
+}
+
+function getDocumentPlacementBlocks(html) {
+  const root = parseDocumentRoot(html);
+  const children = Array.from(root?.children || []);
+  const tocIndex = children.findIndex((node) => node.classList?.contains("auto-toc"));
+  const blocks = [
+    {
+      id: "start",
+      label: "Inicio del apunte",
+      detail: "Debajo del indice",
+      insertionIndex: tocIndex >= 0 ? tocIndex + 1 : 0,
+      html: '<p class="placement-empty">Inicio del documento</p>',
+      start: true,
+    },
+  ];
+
+  children.forEach((node, index) => {
+    if (node.classList?.contains("auto-toc")) return;
+    const text = (node.textContent || node.getAttribute("alt") || "").replace(/\s+/g, " ").trim();
+    blocks.push({
+      id: `block-${index}`,
+      label: node.matches?.("h1, h2, h3, h4") ? (text || "Titulo") : "Bloque del apunte",
+      detail: text || "Bloque vacio",
+      insertionIndex: index + 1,
+      beforeIndex: index,
+      html: node.outerHTML,
+    });
+  });
+
+  blocks.push({
+    id: "end",
+    label: "Final del apunte",
+    detail: "Debajo de todo",
+    insertionIndex: children.length,
+    html: '<p class="placement-empty">Final del documento</p>',
+    end: true,
+  });
+  return blocks;
 }
 
 function insertHtmlAtDocumentPosition(documentHtml, insertionHtml, insertionIndex) {
