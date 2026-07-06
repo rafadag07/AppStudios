@@ -330,6 +330,17 @@ function App() {
     setSyncStatus(status);
   };
 
+  const applyRemoteRow = (row, status = "Actualizado desde la nube") => {
+    if (!row?.data) return;
+    if (localIsNewerThanRemote(row.updated_at)) {
+      setSyncStatus("Nube antigua ignorada");
+      return;
+    }
+    const json = JSON.stringify(row.data);
+    if (json === lastCloudJsonRef.current) return;
+    applyRemoteData(row.data, status);
+  };
+
   const loadCloudSession = async (session) => {
     const savedCode = localStorage.getItem(SYNC_CODE_KEY);
     if (savedCode) return;
@@ -427,30 +438,32 @@ function App() {
   useEffect(() => {
     if (!cloudUser) return undefined;
     const subscribe = cloudUser.mode === "code" ? subscribeToSharedSpace : subscribeToCloudData;
-    return subscribe(cloudUser.id, (row) => {
-      if (!row?.data) return;
-      if (localIsNewerThanRemote(row.updated_at)) {
-        setSyncStatus("Nube antigua ignorada");
-        return;
-      }
-      const json = JSON.stringify(row.data);
-      if (json === lastCloudJsonRef.current) return;
-      migrateSubjectQuestions(row.data);
-      lastCloudJsonRef.current = json;
-      skipCloudSaveRef.current = true;
-      setData(row.data);
-      setSyncStatus("Actualizado desde la nube");
-    });
+    return subscribe(cloudUser.id, (row) => applyRemoteRow(row));
   }, [cloudUser?.id]);
 
   useEffect(() => {
+    if (!cloudUser) return undefined;
+    const fetchLatest = cloudUser.mode === "code" ? fetchSharedSpace : fetchCloudData;
+    const timer = window.setInterval(async () => {
+      try {
+        const row = await fetchLatest(cloudUser.id);
+        applyRemoteRow(row);
+      } catch (error) {
+        console.error(error);
+      }
+    }, 6000);
+    return () => window.clearInterval(timer);
+  }, [cloudUser?.id, cloudUser?.mode]);
+
+  useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    const cameFromRemote = skipCloudSaveRef.current;
     if (initialLocalWriteRef.current) {
       initialLocalWriteRef.current = false;
       if (hadStoredDataRef.current && !localStorage.getItem(LOCAL_DATA_UPDATED_KEY)) {
         localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
       }
-    } else {
+    } else if (!cameFromRemote) {
       hadStoredDataRef.current = true;
       localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
     }
