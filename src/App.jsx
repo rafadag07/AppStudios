@@ -2248,6 +2248,38 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     return `<div${spacing}><br></div>`;
   };
 
+  const getTopLevelEditorBlock = (node) => {
+    if (!editorRef.current || !node) return null;
+    let block = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    while (block && block.parentElement && block.parentElement !== editorRef.current) {
+      block = block.parentElement;
+    }
+    return block && block.parentElement === editorRef.current ? block : null;
+  };
+
+  const isEmptyEditorLine = (block) => {
+    if (!block || block === editorRef.current) return false;
+    if (block.querySelector?.("img, table, .study-block, .study-code-block")) return false;
+    return !block.textContent.replace(/\u00a0/g, " ").trim();
+  };
+
+  const insertEmptyLineAfter = (block, indentLevel) => {
+    const line = document.createElement("div");
+    if (indentLevel > 0) {
+      line.dataset.indentLevel = String(indentLevel);
+      line.style.paddingLeft = `${indentLevel * 2}rem`;
+    }
+    line.appendChild(document.createElement("br"));
+    block?.after(line);
+    const range = document.createRange();
+    range.setStart(line, 0);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    savedRangeRef.current = range.cloneRange();
+  };
+
   const insertHtml = (html) => {
     restoreSelection();
     document.execCommand("insertHTML", false, html);
@@ -2515,6 +2547,12 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
       const block = getCurrentEditableBlock();
       const indentLevel = getIndentLevel(block);
       event.preventDefault();
+      const topLevelBlock = getTopLevelEditorBlock(selection.anchorNode);
+      if (isEmptyEditorLine(topLevelBlock)) {
+        insertEmptyLineAfter(topLevelBlock, indentLevel);
+        saveDocument();
+        return;
+      }
       document.execCommand("insertHTML", false, createIndentedLineBreak(indentLevel));
       saveSelection();
       saveDocument();
