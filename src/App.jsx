@@ -80,6 +80,7 @@ const priorities = ["baja", "media", "alta"];
 const resourceTypes = ["link", "pdf", "video", "libro", "otro"];
 const SYNC_CODE_KEY = "summer-study-campus-sync-code";
 const POMODORO_HISTORY_KEY = "appstudios-pomodoro-history-v1";
+const LOCAL_DATA_UPDATED_KEY = "appstudios-local-data-updated-at";
 const subjectSections = [
   { id: "teoria", label: "Teoría" },
   { id: "seminarios", label: "Seminarios" },
@@ -309,7 +310,17 @@ function App() {
   const latestDataRef = useRef(data);
   const lastCloudJsonRef = useRef("");
   const skipCloudSaveRef = useRef(false);
+  const hadStoredDataRef = useRef(Boolean(localStorage.getItem(STORAGE_KEY)));
+  const initialLocalWriteRef = useRef(true);
   const pomodoro = useGlobalPomodoro(data);
+
+  const getLocalUpdatedAt = () => localStorage.getItem(LOCAL_DATA_UPDATED_KEY) || "";
+
+  const localIsNewerThanRemote = (remoteUpdatedAt) => {
+    const localUpdatedAt = getLocalUpdatedAt();
+    if (!hadStoredDataRef.current || !localUpdatedAt || !remoteUpdatedAt) return false;
+    return getTimeValue(localUpdatedAt) > getTimeValue(remoteUpdatedAt);
+  };
 
   const applyRemoteData = (remoteData, status = "Sincronizado") => {
     migrateSubjectQuestions(remoteData);
@@ -333,7 +344,13 @@ function App() {
     try {
       const remote = await fetchCloudData(session.user.id);
       if (remote?.data) {
-        applyRemoteData(remote.data);
+        if (localIsNewerThanRemote(remote.updated_at)) {
+          await saveCloudData(session.user.id, latestDataRef.current);
+          lastCloudJsonRef.current = JSON.stringify(latestDataRef.current);
+          setSyncStatus("Local recuperado y subido");
+        } else {
+          applyRemoteData(remote.data);
+        }
       } else {
         await saveCloudData(session.user.id, latestDataRef.current);
         lastCloudJsonRef.current = JSON.stringify(latestDataRef.current);
@@ -361,7 +378,13 @@ function App() {
     localStorage.setItem(SYNC_CODE_KEY, syncId);
     setCloudUser({ id: syncId, email: syncId, mode: "code" });
     if (remote?.data) {
-      applyRemoteData(remote.data);
+      if (localIsNewerThanRemote(remote.updated_at)) {
+        await saveSharedSpace(syncId, latestDataRef.current);
+        lastCloudJsonRef.current = JSON.stringify(latestDataRef.current);
+        setSyncStatus("Local recuperado y subido");
+      } else {
+        applyRemoteData(remote.data);
+      }
     } else {
       await saveSharedSpace(syncId, latestDataRef.current);
       lastCloudJsonRef.current = JSON.stringify(latestDataRef.current);
@@ -406,6 +429,10 @@ function App() {
     const subscribe = cloudUser.mode === "code" ? subscribeToSharedSpace : subscribeToCloudData;
     return subscribe(cloudUser.id, (row) => {
       if (!row?.data) return;
+      if (localIsNewerThanRemote(row.updated_at)) {
+        setSyncStatus("Nube antigua ignorada");
+        return;
+      }
       const json = JSON.stringify(row.data);
       if (json === lastCloudJsonRef.current) return;
       migrateSubjectQuestions(row.data);
@@ -418,6 +445,15 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    if (initialLocalWriteRef.current) {
+      initialLocalWriteRef.current = false;
+      if (hadStoredDataRef.current && !localStorage.getItem(LOCAL_DATA_UPDATED_KEY)) {
+        localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
+      }
+    } else {
+      hadStoredDataRef.current = true;
+      localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
+    }
     if (!cloudUser) return undefined;
     if (skipCloudSaveRef.current) {
       skipCloudSaveRef.current = false;
@@ -895,6 +931,11 @@ function SubjectsPage({ data, setView, openModal, updateData, query }) {
     </div>
   );
 }
+
+const getTimeValue = (value) => {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+};
 function StudyMapPage({ data, setView, updateData }) {
   const [mapView, setMapView] = useState("tree");
   const enrichedSubjects = data.subjects.map((subject) => {
