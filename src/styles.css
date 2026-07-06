@@ -398,6 +398,13 @@ select {
   cursor: pointer;
 }
 
+.study-document img.pdf-crop-image {
+  display: block;
+  width: 70%;
+  max-width: 100%;
+  margin: 1rem auto;
+}
+
 .study-document img.selected-editor-image {
   outline: 4px solid rgba(47, 111, 115, 0.35);
   outline-offset: 4px;

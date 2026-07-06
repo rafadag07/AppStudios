@@ -1644,10 +1644,7 @@ function PdfViewerPage({ subject, theme, file, initialPage, setView, updateData 
     updateData((draft) => {
       const target = findTheme(draft, subject.id, theme.id);
       const content = selectedSnapshot
-        ? `<figure class="pdf-selection-note" data-pdf-source="${file.id}" data-pdf-page="${pageNumber}">
-            <img src="${selectedSnapshot}" alt="Fragmento de ${escapeHtml(file.name)}" />
-            <figcaption>Fragmento de PDF: ${escapeHtml(file.name)}, pagina ${pageNumber}</figcaption>
-          </figure>`
+        ? `<p><img class="pdf-crop-image" data-pdf-source="${file.id}" data-pdf-page="${pageNumber}" src="${selectedSnapshot}" alt="Recorte de ${escapeHtml(file.name)}" /></p><p><br></p>`
         : `<blockquote data-pdf-source="${file.id}" data-pdf-page="${pageNumber}">
             <strong>Fragmento de PDF: ${escapeHtml(file.name)}, pagina ${pageNumber}</strong>
             <pre>${escapeHtml(selectedText)}</pre>
@@ -2126,6 +2123,8 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
 
   const runCommand = (command, commandValue = null) => {
     restoreSelection();
+    editorRef.current?.focus();
+    document.execCommand("styleWithCSS", false, false);
     document.execCommand(command, false, commandValue);
     saveSelection();
     saveDocument();
@@ -2426,12 +2425,29 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   };
 
   const handleEditorKeyDown = (event) => {
-    if (event.key !== "Tab") return;
     if (!editorRef.current?.contains(event.target)) return;
-    event.preventDefault();
     const codeContent = event.target?.closest?.(".study-code-content");
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
+
+    if (event.key === "Enter" && !event.shiftKey && !codeContent) {
+      const block = getCurrentEditableBlock();
+      const lineText = block?.textContent || "";
+      const indentation = lineText.match(/^[\t \u00a0]+/)?.[0] || "";
+      if (!indentation) return;
+      event.preventDefault();
+      const htmlIndentation = indentation
+        .replace(/\t/g, "&nbsp;&nbsp;&nbsp;&nbsp;")
+        .replace(/ /g, "&nbsp;")
+        .replace(/\u00a0/g, "&nbsp;");
+      document.execCommand("insertHTML", false, `<br>${htmlIndentation}`);
+      saveSelection();
+      saveDocument();
+      return;
+    }
+
+    if (event.key !== "Tab") return;
+    event.preventDefault();
     const range = selection.getRangeAt(0);
     range.deleteContents();
     const tab = document.createTextNode(codeContent ? "  " : "\u00a0\u00a0\u00a0\u00a0");
