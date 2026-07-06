@@ -5057,7 +5057,7 @@ async function exportThemeVisualPdf(subject, theme, options = { includeToc: true
 
   try {
     const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const pages = paginateExportDocument(exportShell, sourceDocument, subject, theme);
+    const pages = await paginateExportDocument(exportShell, sourceDocument, subject, theme);
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
 
@@ -5081,7 +5081,7 @@ async function exportThemeVisualPdf(subject, theme, options = { includeToc: true
   }
 }
 
-function paginateExportDocument(exportShell, sourceDocument, subject, theme) {
+async function paginateExportDocument(exportShell, sourceDocument, subject, theme) {
   const pageHeight = 1414;
   const pages = [];
   const sourceNodes = Array.from(sourceDocument.childNodes).filter((node) => node.textContent?.trim() || node.nodeType === Node.ELEMENT_NODE);
@@ -5090,21 +5090,89 @@ function paginateExportDocument(exportShell, sourceDocument, subject, theme) {
   exportShell.appendChild(page);
   pages.push(page);
 
-  sourceNodes.forEach((node) => {
+  for (const node of sourceNodes) {
     const clone = node.cloneNode(true);
+    prepareNodeForPdfExport(clone);
     page.appendChild(clone);
-    const hasHeader = !!page.querySelector("[data-export-header]");
-    const singleContentOnPage = page.childNodes.length === (hasHeader ? 2 : 1);
-    if (page.scrollHeight > pageHeight && (!singleContentOnPage || hasHeader)) {
+    await waitForExportNodeLayout(clone);
+
+    const contentCount = getPdfPageContentCount(page);
+    if (page.scrollHeight > pageHeight && contentCount > 1) {
       clone.remove();
       page = createVisualPdfPage(subject, theme, false);
       exportShell.appendChild(page);
       pages.push(page);
       page.appendChild(clone);
+      await waitForExportNodeLayout(clone);
     }
-  });
+
+    if (page.scrollHeight > pageHeight) {
+      fitOversizedPdfNode(clone, page, pageHeight);
+      await waitForExportNodeLayout(clone);
+    }
+  }
 
   return pages;
+}
+
+function getPdfPageContentCount(page) {
+  return Array.from(page.children).filter((child) => !child.dataset.exportHeader).length;
+}
+
+function prepareNodeForPdfExport(node) {
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+  const element = node;
+  element.style.breakInside = "avoid";
+  element.style.pageBreakInside = "avoid";
+  if (element.matches("img")) preparePdfImage(element);
+  element.querySelectorAll?.("img").forEach(preparePdfImage);
+  element.querySelectorAll?.(".study-block, .study-code-block, .pdf-selection-note, blockquote, table, figure").forEach((child) => {
+    child.style.breakInside = "avoid";
+    child.style.pageBreakInside = "avoid";
+  });
+}
+
+function preparePdfImage(image) {
+  image.style.display = "block";
+  image.style.maxWidth = "100%";
+  image.style.height = "auto";
+  image.style.objectFit = "contain";
+  image.style.breakInside = "avoid";
+  image.style.pageBreakInside = "avoid";
+}
+
+async function waitForExportNodeLayout(node) {
+  const images = node.nodeType === Node.ELEMENT_NODE ? Array.from(node.matches("img") ? [node] : node.querySelectorAll("img")) : [];
+  await Promise.all(
+    images.map((image) => {
+      if (image.complete && image.naturalWidth) return Promise.resolve();
+      if (image.decode) return image.decode().catch(() => {});
+      return new Promise((resolve) => {
+        image.onload = resolve;
+        image.onerror = resolve;
+      });
+    })
+  );
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+function fitOversizedPdfNode(node, page, pageHeight) {
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+  const images = Array.from(node.matches("img") ? [node] : node.querySelectorAll("img"));
+  if (!images.length) return;
+
+  let guard = 0;
+  while (page.scrollHeight > pageHeight && guard < 8) {
+    const overflow = page.scrollHeight - pageHeight + 36;
+    const largestImage = images.reduce((largest, image) => (image.getBoundingClientRect().height > largest.getBoundingClientRect().height ? image : largest), images[0]);
+    const currentHeight = largestImage.getBoundingClientRect().height;
+    const nextHeight = Math.max(320, currentHeight - overflow);
+    largestImage.style.maxHeight = `${nextHeight}px`;
+    largestImage.style.width = "auto";
+    largestImage.style.marginLeft = "auto";
+    largestImage.style.marginRight = "auto";
+    guard += 1;
+  }
 }
 
 function createVisualPdfPage(subject, theme, includeHeader) {
