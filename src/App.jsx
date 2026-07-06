@@ -2229,6 +2229,25 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     saveDocument();
   };
 
+  const getIndentLevel = (block) => Number.parseInt(block?.dataset?.indentLevel || "0", 10) || 0;
+
+  const applyBlockIndent = (block, level) => {
+    if (!block || block === editorRef.current || block.closest?.(".auto-toc")) return;
+    const nextLevel = Math.max(0, Math.min(10, level));
+    if (nextLevel <= 0) {
+      delete block.dataset.indentLevel;
+      block.style.paddingLeft = "";
+      return;
+    }
+    block.dataset.indentLevel = String(nextLevel);
+    block.style.paddingLeft = `${nextLevel * 2}rem`;
+  };
+
+  const createIndentedLineBreak = (indentLevel) => {
+    const spacing = indentLevel > 0 ? ` style="padding-left:${indentLevel * 2}rem" data-indent-level="${indentLevel}"` : "";
+    return `<div${spacing}><br></div>`;
+  };
+
   const insertHtml = (html) => {
     restoreSelection();
     document.execCommand("insertHTML", false, html);
@@ -2494,15 +2513,9 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
 
     if (event.key === "Enter" && !event.shiftKey && !codeContent) {
       const block = getCurrentEditableBlock();
-      const lineText = block?.textContent || "";
-      const indentation = lineText.match(/^[\t \u00a0]+/)?.[0] || "";
-      if (!indentation) return;
+      const indentLevel = getIndentLevel(block);
       event.preventDefault();
-      const htmlIndentation = indentation
-        .replace(/\t/g, "&nbsp;&nbsp;&nbsp;&nbsp;")
-        .replace(/ /g, "&nbsp;")
-        .replace(/\u00a0/g, "&nbsp;");
-      document.execCommand("insertHTML", false, `<br>${htmlIndentation}`);
+      document.execCommand("insertHTML", false, createIndentedLineBreak(indentLevel));
       saveSelection();
       saveDocument();
       return;
@@ -2510,9 +2523,16 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
 
     if (event.key !== "Tab") return;
     event.preventDefault();
+    if (!codeContent) {
+      const block = getCurrentEditableBlock();
+      applyBlockIndent(block, getIndentLevel(block) + (event.shiftKey ? -1 : 1));
+      saveSelection();
+      saveDocument();
+      return;
+    }
     const range = selection.getRangeAt(0);
     range.deleteContents();
-    const tab = document.createTextNode(codeContent ? "  " : "\u00a0\u00a0\u00a0\u00a0");
+    const tab = document.createTextNode("  ");
     range.insertNode(tab);
     range.setStartAfter(tab);
     range.collapse(true);
@@ -4663,6 +4683,17 @@ function normalizeEditableBlocks(editor) {
     if (!block.classList.contains("study-content-small") && !block.classList.contains("study-content-large")) {
       block.classList.add("study-content-normal");
     }
+  });
+  editor.querySelectorAll(":scope > p, :scope > div:not(.auto-toc)").forEach((block) => {
+    if (block.closest(".study-block, .study-code-block") || block.dataset.indentLevel) return;
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    const firstText = walker.nextNode();
+    const leading = firstText?.textContent.match(/^[\t \u00a0]{2,}/)?.[0] || "";
+    if (!leading) return;
+    const level = Math.max(1, Math.ceil(leading.replace(/\t/g, "    ").length / 4));
+    block.dataset.indentLevel = String(level);
+    block.style.paddingLeft = `${level * 2}rem`;
+    firstText.textContent = firstText.textContent.slice(leading.length);
   });
 }
 

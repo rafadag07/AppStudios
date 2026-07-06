@@ -146,7 +146,11 @@ select {
 }
 
 .study-document p {
-  margin: 0.75rem 0;
+  margin: 0.22rem 0;
+}
+
+.study-document > div:not(.auto-toc) {
+  margin: 0.22rem 0;
 }
 
 .study-document ul,
