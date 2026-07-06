@@ -2423,7 +2423,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     if (!block) return;
     insertHtml(`
       <section class="study-block study-block-${block.tone} study-content-normal" contenteditable="false" data-study-block="true" data-block-size="normal">
-        <div class="study-block-label">${escapeHtml(block.title)}</div>
+        <div class="study-block-label" contenteditable="true" spellcheck="false">${escapeHtml(block.title)}</div>
         <div class="study-block-body" contenteditable="true">${escapeHtml(block.body).replace(/\n/g, "<br>")}</div>
       </section><p><br></p>
     `);
@@ -4859,6 +4859,15 @@ function normalizeEditableBlocks(editor) {
     if (!block.dataset.blockSize) block.dataset.blockSize = "normal";
     if (!block.classList.contains("study-content-small") && !block.classList.contains("study-content-large")) {
       block.classList.add("study-content-normal");
+    }
+    if (block.classList.contains("study-block")) {
+      const label = block.querySelector(".study-block-label");
+      const body = block.querySelector(".study-block-body");
+      if (label) {
+        label.contentEditable = "true";
+        label.spellcheck = false;
+      }
+      if (body) body.contentEditable = "true";
     }
   });
   editor.querySelectorAll(":scope > p, :scope > div:not(.auto-toc)").forEach((block) => {

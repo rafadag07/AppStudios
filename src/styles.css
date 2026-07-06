@@ -229,6 +229,11 @@ select {
 
 .study-document .study-block-label {
   margin-bottom: 0.5rem;
+  width: max-content;
+  max-width: 100%;
+  border-radius: 6px;
+  outline: none;
+  padding: 0.1rem 0.2rem;
   font-size: 0.9rem;
   font-weight: 900;
   letter-spacing: 0.04em;
@@ -242,6 +247,7 @@ select {
   outline: none;
 }
 
+.study-document .study-block-label:focus,
 .study-document .study-block-body:focus,
 .study-document .study-code-content:focus {
   box-shadow: 0 0 0 4px rgba(47, 111, 115, 0.14);
