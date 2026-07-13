@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Cloud,
   Clock3,
+  Download,
   HelpCircle,
   FileText,
   Grid3X3,
@@ -29,8 +30,6 @@ import {
   List,
   ListChecks,
   ListOrdered,
-  LogOut,
-  Mail,
   Maximize2,
   Menu,
   Minimize2,
@@ -56,21 +55,6 @@ import {
 } from "lucide-react";
 import { STORAGE_KEY, createId, initialData } from "./data/schema";
 import { getStoredFile, saveStoredFile } from "./data/fileStore";
-import {
-  createSyncCode,
-  fetchCloudData,
-  fetchSharedSpace,
-  getCurrentSession,
-  isSupabaseConfigured,
-  normalizeSyncCode,
-  saveCloudData,
-  saveSharedSpace,
-  signInWithEmail,
-  signOutCloud,
-  subscribeToCloudData,
-  subscribeToSharedSpace,
-  supabase,
-} from "./data/supabaseClient";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -78,9 +62,9 @@ const days = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "do
 const statuses = ["nada", "medio", "estudiado"];
 const priorities = ["baja", "media", "alta"];
 const resourceTypes = ["link", "pdf", "video", "libro", "otro"];
-const SYNC_CODE_KEY = "summer-study-campus-sync-code";
 const POMODORO_HISTORY_KEY = "appstudios-pomodoro-history-v1";
 const LOCAL_DATA_UPDATED_KEY = "appstudios-local-data-updated-at";
+const MANUAL_SYNC_KEY = "appstudios-manual-sync-key";
 const subjectSections = [
   { id: "teoria", label: "Teoría" },
   { id: "seminarios", label: "Seminarios" },
@@ -305,110 +289,134 @@ function App() {
   const [view, setView] = useState({ page: "dashboard" });
   const [modal, setModal] = useState(null);
   const [query, setQuery] = useState("");
-  const [cloudUser, setCloudUser] = useState(null);
-  const [syncStatus, setSyncStatus] = useState(isSupabaseConfigured ? "Preparando sincronizacion" : "Modo local");
+  const [cloudInfo, setCloudInfo] = useState(null);
+  const [syncStatus, setSyncStatus] = useState("Nube manual");
+  const [syncBusy, setSyncBusy] = useState(false);
   const latestDataRef = useRef(data);
-  const lastCloudJsonRef = useRef("");
-  const skipCloudSaveRef = useRef(false);
   const hadStoredDataRef = useRef(Boolean(localStorage.getItem(STORAGE_KEY)));
   const initialLocalWriteRef = useRef(true);
   const pomodoro = useGlobalPomodoro(data);
 
-  const getLocalUpdatedAt = () => localStorage.getItem(LOCAL_DATA_UPDATED_KEY) || "";
-
-  const localIsNewerThanRemote = (remoteUpdatedAt) => {
-    const localUpdatedAt = getLocalUpdatedAt();
-    if (!hadStoredDataRef.current || !localUpdatedAt || !remoteUpdatedAt) return false;
-    return getTimeValue(localUpdatedAt) > getTimeValue(remoteUpdatedAt);
+  const getManualSyncKey = () => {
+    const current = localStorage.getItem(MANUAL_SYNC_KEY);
+    if (current) return current;
+    const next = window.prompt("Introduce la clave de sincronizacion manual de AppStudios. Se guardara solo en este dispositivo.");
+    if (next?.trim()) {
+      localStorage.setItem(MANUAL_SYNC_KEY, next.trim());
+      return next.trim();
+    }
+    return "";
   };
 
-  const applyRemoteData = (remoteData, status = "Sincronizado") => {
-    migrateSubjectQuestions(remoteData);
-    skipCloudSaveRef.current = true;
-    lastCloudJsonRef.current = JSON.stringify(remoteData);
-    setData(remoteData);
+  const syncRequest = async (options = {}, retryWithKey = true) => {
+    const syncKey = localStorage.getItem(MANUAL_SYNC_KEY) || "";
+    const response = await fetch("/api/appstudios-sync", {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(syncKey ? { "x-appstudios-sync-key": syncKey } : {}),
+        ...(options.headers || {}),
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 401 && retryWithKey) {
+      const nextKey = getManualSyncKey();
+      if (nextKey) return syncRequest(options, false);
+    }
+    if (!response.ok) {
+      throw new Error(payload.error || "No se ha podido conectar con la nube manual.");
+    }
+    return payload;
+  };
+
+  const applyImportedData = (importedData, status = "Datos actualizados") => {
+    if (!importedData?.subjects || !Array.isArray(importedData.subjects)) {
+      throw new Error("La copia no parece ser de AppStudios.");
+    }
+    migrateSubjectQuestions(importedData);
+    setData(importedData);
+    hadStoredDataRef.current = true;
+    localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
     setSyncStatus(status);
   };
 
-  const applyRemoteRow = (row, status = "Actualizado desde la nube") => {
-    if (!row?.data) return;
-    if (localIsNewerThanRemote(row.updated_at)) {
-      setSyncStatus("Nube antigua ignorada");
-      return;
-    }
-    const json = JSON.stringify(row.data);
-    if (json === lastCloudJsonRef.current) return;
-    applyRemoteData(row.data, status);
-  };
-
-  const loadCloudSession = async (session) => {
-    const savedCode = localStorage.getItem(SYNC_CODE_KEY);
-    if (savedCode) return;
-    if (!session?.user) {
-      setCloudUser(null);
-      setSyncStatus(isSupabaseConfigured ? "Sin iniciar sesion" : "Modo local");
-      return;
-    }
-
-    setCloudUser({ id: session.user.id, email: session.user.email, mode: "email" });
-    setSyncStatus("Descargando datos");
+  const uploadManualCloud = async () => {
+    if (!window.confirm("Vas a subir los datos de ESTE dispositivo como copia principal. Usalo solo si aqui estan los datos correctos. Continuar?")) return;
+    setSyncBusy(true);
+    setSyncStatus("Subiendo datos");
     try {
-      const remote = await fetchCloudData(session.user.id);
-      if (remote?.data) {
-        if (localIsNewerThanRemote(remote.updated_at)) {
-          await saveCloudData(session.user.id, latestDataRef.current);
-          lastCloudJsonRef.current = JSON.stringify(latestDataRef.current);
-          setSyncStatus("Local recuperado y subido");
-        } else {
-          applyRemoteData(remote.data);
-        }
-      } else {
-        await saveCloudData(session.user.id, latestDataRef.current);
-        lastCloudJsonRef.current = JSON.stringify(latestDataRef.current);
-        setSyncStatus("Sincronizado");
-      }
+      const result = await syncRequest({
+        method: "POST",
+        body: JSON.stringify({ data: latestDataRef.current }),
+      });
+      setCloudInfo(result);
+      localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
+      setSyncStatus("Datos subidos");
     } catch (error) {
       console.error(error);
-      setSyncStatus("Error de sincronizacion");
+      setSyncStatus(error.message);
+    } finally {
+      setSyncBusy(false);
     }
   };
 
-  const requestCloudSignIn = async (email) => {
-    setSyncStatus("Enviando enlace");
-    await signInWithEmail(email);
-    setSyncStatus("Revisa tu correo");
-  };
-
-  const connectWithSyncCode = async (rawCode) => {
-    const syncId = normalizeSyncCode(rawCode || createSyncCode());
-    if (!/^CAMPUS-[A-Z0-9]{6}-[A-Z0-9]{6}$/.test(syncId)) {
-      throw new Error("Usa un codigo con formato CAMPUS-XXXXXX-XXXXXX.");
-    }
-    setSyncStatus("Conectando codigo");
-    const remote = await fetchSharedSpace(syncId);
-    localStorage.setItem(SYNC_CODE_KEY, syncId);
-    setCloudUser({ id: syncId, email: syncId, mode: "code" });
-    if (remote?.data) {
-      if (localIsNewerThanRemote(remote.updated_at)) {
-        await saveSharedSpace(syncId, latestDataRef.current);
-        lastCloudJsonRef.current = JSON.stringify(latestDataRef.current);
-        setSyncStatus("Local recuperado y subido");
-      } else {
-        applyRemoteData(remote.data);
+  const downloadManualCloud = async () => {
+    setSyncBusy(true);
+    setSyncStatus("Buscando copia");
+    try {
+      const result = await syncRequest();
+      if (!result?.data) throw new Error("No hay copia guardada en la nube manual.");
+      const when = result.updatedAt ? new Date(result.updatedAt).toLocaleString("es-ES") : "fecha desconocida";
+      if (!window.confirm(`Esto sustituira los datos de este dispositivo por la copia de la nube (${when}). Continuar?`)) {
+        setSyncStatus("Actualizacion cancelada");
+        return;
       }
-    } else {
-      await saveSharedSpace(syncId, latestDataRef.current);
-      lastCloudJsonRef.current = JSON.stringify(latestDataRef.current);
-      setSyncStatus("Sincronizado");
+      applyImportedData(result.data, "Datos actualizados desde nube");
+      setCloudInfo(result);
+    } catch (error) {
+      console.error(error);
+      setSyncStatus(error.message);
+    } finally {
+      setSyncBusy(false);
     }
-    return syncId;
   };
 
-  const disconnectCloud = async () => {
-    localStorage.removeItem(SYNC_CODE_KEY);
-    await signOutCloud();
-    setCloudUser(null);
-    setSyncStatus("Sin iniciar sesion");
+  const refreshManualCloudInfo = async () => {
+    try {
+      const result = await syncRequest();
+      setCloudInfo(result);
+      setSyncStatus(result?.updatedAt ? "Copia en nube encontrada" : "Sin copia en nube");
+    } catch (error) {
+      console.error(error);
+      setSyncStatus(error.message);
+    }
+  };
+
+  const exportLocalBackup = () => {
+    const payload = {
+      app: "AppStudios",
+      exportedAt: new Date().toISOString(),
+      data: latestDataRef.current,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `appstudios-copia-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setSyncStatus("Copia descargada");
+  };
+
+  const importLocalBackup = async (file) => {
+    if (!file) return;
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    const importedData = payload?.data || payload;
+    if (!window.confirm("Esto sustituira los datos de este dispositivo por la copia importada. Continuar?")) return;
+    applyImportedData(importedData, "Copia importada");
   };
 
   useEffect(() => {
@@ -416,78 +424,21 @@ function App() {
   }, [data]);
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) return undefined;
-    let active = true;
-    const savedCode = localStorage.getItem(SYNC_CODE_KEY);
-    if (savedCode) connectWithSyncCode(savedCode).catch((error) => {
-      console.error(error);
-      setSyncStatus("Error de sincronizacion");
-    });
-    getCurrentSession().then((session) => active && loadCloudSession(session));
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (active) loadCloudSession(session);
-    });
-    return () => {
-      active = false;
-      subscription.unsubscribe();
-    };
+    refreshManualCloudInfo();
   }, []);
 
   useEffect(() => {
-    if (!cloudUser) return undefined;
-    const subscribe = cloudUser.mode === "code" ? subscribeToSharedSpace : subscribeToCloudData;
-    return subscribe(cloudUser.id, (row) => applyRemoteRow(row));
-  }, [cloudUser?.id]);
-
-  useEffect(() => {
-    if (!cloudUser) return undefined;
-    const fetchLatest = cloudUser.mode === "code" ? fetchSharedSpace : fetchCloudData;
-    const timer = window.setInterval(async () => {
-      try {
-        const row = await fetchLatest(cloudUser.id);
-        applyRemoteRow(row);
-      } catch (error) {
-        console.error(error);
-      }
-    }, 6000);
-    return () => window.clearInterval(timer);
-  }, [cloudUser?.id, cloudUser?.mode]);
-
-  useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    const cameFromRemote = skipCloudSaveRef.current;
     if (initialLocalWriteRef.current) {
       initialLocalWriteRef.current = false;
       if (hadStoredDataRef.current && !localStorage.getItem(LOCAL_DATA_UPDATED_KEY)) {
         localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
       }
-    } else if (!cameFromRemote) {
+    } else {
       hadStoredDataRef.current = true;
       localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
     }
-    if (!cloudUser) return undefined;
-    if (skipCloudSaveRef.current) {
-      skipCloudSaveRef.current = false;
-      return undefined;
-    }
-    const json = JSON.stringify(data);
-    if (json === lastCloudJsonRef.current) return undefined;
-    setSyncStatus("Guardando en la nube");
-    const timer = window.setTimeout(async () => {
-      try {
-        if (cloudUser.mode === "code") await saveSharedSpace(cloudUser.id, data);
-        else await saveCloudData(cloudUser.id, data);
-        lastCloudJsonRef.current = json;
-        setSyncStatus("Sincronizado");
-      } catch (error) {
-        console.error(error);
-        setSyncStatus("Error de sincronizacion");
-      }
-    }, 900);
-    return () => window.clearTimeout(timer);
-  }, [data, cloudUser?.id, cloudUser?.mode]);
+  }, [data]);
 
   const allThemes = useMemo(
     () => data.subjects.flatMap((subject) => subject.themes.map((theme) => ({ ...theme, subject }))),
@@ -516,11 +467,13 @@ function App() {
         query={query}
         setQuery={setQuery}
         openModal={setModal}
-        cloudUser={cloudUser}
+        cloudInfo={cloudInfo}
         syncStatus={syncStatus}
-        onCloudSignIn={requestCloudSignIn}
-        onCodeSignIn={connectWithSyncCode}
-        onCloudSignOut={disconnectCloud}
+        syncBusy={syncBusy}
+        onUploadCloud={uploadManualCloud}
+        onDownloadCloud={downloadManualCloud}
+        onExportBackup={exportLocalBackup}
+        onImportBackup={importLocalBackup}
       >
         {view.page === "dashboard" && (
           <Dashboard
@@ -572,7 +525,22 @@ function App() {
   );
 }
 
-function Shell({ children, view, setView, subjects, query, setQuery, openModal, cloudUser, syncStatus, onCloudSignIn, onCodeSignIn, onCloudSignOut }) {
+function Shell({
+  children,
+  view,
+  setView,
+  subjects,
+  query,
+  setQuery,
+  openModal,
+  cloudInfo,
+  syncStatus,
+  syncBusy,
+  onUploadCloud,
+  onDownloadCloud,
+  onExportBackup,
+  onImportBackup,
+}) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const nav = [
     ["dashboard", "Inicio", Sparkles],
@@ -593,11 +561,13 @@ function Shell({ children, view, setView, subjects, query, setQuery, openModal, 
           view={view}
           setView={setView}
           subjects={subjects}
-          cloudUser={cloudUser}
+          cloudInfo={cloudInfo}
           syncStatus={syncStatus}
-          onCloudSignIn={onCloudSignIn}
-          onCodeSignIn={onCodeSignIn}
-          onCloudSignOut={onCloudSignOut}
+          syncBusy={syncBusy}
+          onUploadCloud={onUploadCloud}
+          onDownloadCloud={onDownloadCloud}
+          onExportBackup={onExportBackup}
+          onImportBackup={onImportBackup}
         />
       </aside>
       {mobileMenuOpen && (
@@ -615,11 +585,13 @@ function Shell({ children, view, setView, subjects, query, setQuery, openModal, 
                 setMobileMenuOpen(false);
               }}
               subjects={subjects}
-              cloudUser={cloudUser}
+              cloudInfo={cloudInfo}
               syncStatus={syncStatus}
-              onCloudSignIn={onCloudSignIn}
-              onCodeSignIn={onCodeSignIn}
-              onCloudSignOut={onCloudSignOut}
+              syncBusy={syncBusy}
+              onUploadCloud={onUploadCloud}
+              onDownloadCloud={onDownloadCloud}
+              onExportBackup={onExportBackup}
+              onImportBackup={onImportBackup}
             />
           </aside>
         </div>
@@ -647,18 +619,28 @@ function Shell({ children, view, setView, subjects, query, setQuery, openModal, 
             <QuickButton icon={ListChecks} label="Tarea" onClick={() => openModal({ type: "task" })} />
             <QuickButton icon={LinkIcon} label="Recurso" onClick={() => openModal({ type: "resource" })} />
             <QuickButton icon={FileText} label="Apunte" onClick={() => openModal({ type: "quick-note" })} />
-            <CloudSyncButton user={cloudUser} status={syncStatus} onSignIn={onCloudSignIn} onCodeSignIn={onCodeSignIn} onSignOut={onCloudSignOut} />
+            <CloudSyncButton
+              cloudInfo={cloudInfo}
+              status={syncStatus}
+              busy={syncBusy}
+              onUploadCloud={onUploadCloud}
+              onDownloadCloud={onDownloadCloud}
+              onExportBackup={onExportBackup}
+              onImportBackup={onImportBackup}
+            />
           </div>
         </header>
         <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">{children}</div>
       </main>
       <div className="fixed bottom-5 right-4 z-50 md:hidden">
         <CloudSyncButton
-          user={cloudUser}
+          cloudInfo={cloudInfo}
           status={syncStatus}
-          onSignIn={onCloudSignIn}
-          onCodeSignIn={onCodeSignIn}
-          onSignOut={onCloudSignOut}
+          busy={syncBusy}
+          onUploadCloud={onUploadCloud}
+          onDownloadCloud={onDownloadCloud}
+          onExportBackup={onExportBackup}
+          onImportBackup={onImportBackup}
           mobile
         />
       </div>
@@ -666,7 +648,7 @@ function Shell({ children, view, setView, subjects, query, setQuery, openModal, 
   );
 }
 
-function SidebarContent({ nav, view, setView, subjects, cloudUser, syncStatus, onCloudSignIn, onCodeSignIn, onCloudSignOut }) {
+function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, syncBusy, onUploadCloud, onDownloadCloud, onExportBackup, onImportBackup }) {
   return (
     <>
       <button onClick={() => setView({ page: "dashboard" })} className="mb-8 flex items-center gap-3 text-left">
@@ -694,11 +676,13 @@ function SidebarContent({ nav, view, setView, subjects, cloudUser, syncStatus, o
       </nav>
       <div className="mt-4">
         <CloudSyncButton
-          user={cloudUser}
+          cloudInfo={cloudInfo}
           status={syncStatus}
-          onSignIn={onCloudSignIn}
-          onCodeSignIn={onCodeSignIn}
-          onSignOut={onCloudSignOut}
+          busy={syncBusy}
+          onUploadCloud={onUploadCloud}
+          onDownloadCloud={onDownloadCloud}
+          onExportBackup={onExportBackup}
+          onImportBackup={onImportBackup}
           full
         />
       </div>
@@ -721,31 +705,26 @@ function SidebarContent({ nav, view, setView, subjects, cloudUser, syncStatus, o
   );
 }
 
-function CloudSyncButton({ user, status, onSignIn, onCodeSignIn, onSignOut, full = false, mobile = false }) {
+function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadCloud, onExportBackup, onImportBackup, full = false, mobile = false }) {
   const [open, setOpen] = useState(false);
-  const [email, setEmail] = useState(user?.email || "");
-  const [syncCode, setSyncCode] = useState("");
   const [error, setError] = useState("");
+  const importInputRef = useRef(null);
+  const updatedLabel = cloudInfo?.updatedAt ? new Date(cloudInfo.updatedAt).toLocaleString("es-ES") : "Sin copia subida todavia";
 
-  const submit = async (event) => {
-    event.preventDefault();
+  const runAction = async (action, fallback) => {
     setError("");
     try {
-      await onSignIn(email);
+      await action?.();
     } catch (syncError) {
-      setError(syncError.message || "No se ha podido iniciar sesion.");
+      setError(syncError.message || fallback);
     }
   };
 
-  const connectCode = async (event) => {
-    event.preventDefault();
-    setError("");
-    try {
-      const code = await onCodeSignIn(syncCode || createSyncCode());
-      setSyncCode(code);
-    } catch (syncError) {
-      setError(syncError.message || "No se ha podido conectar con ese codigo.");
-    }
+  const importBackup = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    await runAction(() => onImportBackup?.(file), "No se ha podido importar la copia.");
   };
 
   return (
@@ -753,12 +732,12 @@ function CloudSyncButton({ user, status, onSignIn, onCodeSignIn, onSignOut, full
       <button
         onClick={() => setOpen((value) => !value)}
         className={`${full ? "inline-flex w-full justify-center" : mobile ? "inline-flex" : "hidden md:inline-flex"} h-11 items-center gap-2 rounded-lg px-4 text-sm font-black shadow-sm ${
-          user ? "bg-[#dcebdc] text-[#1f5d55]" : "bg-white text-slate-700"
+          cloudInfo?.updatedAt ? "bg-[#dcebdc] text-[#1f5d55]" : "bg-white text-slate-700"
         }`}
-        title="Sincronizacion"
+        title="Nube manual"
       >
         <Cloud size={18} />
-        {user ? "Sync" : "Nube"}
+        Nube
       </button>
       {open && (
         <div className={`${mobile ? "fixed bottom-20 left-4 right-4" : "absolute right-0 top-12 w-80"} z-50 rounded-lg border border-slate-900/10 bg-white p-4 shadow-soft`}>
@@ -767,43 +746,46 @@ function CloudSyncButton({ user, status, onSignIn, onCodeSignIn, onSignOut, full
               <Cloud size={19} />
             </span>
             <div>
-              <h2 className="font-black">Sincronizacion</h2>
+              <h2 className="font-black">Nube manual</h2>
               <p className="text-sm text-slate-500">{status}</p>
             </div>
           </div>
 
-          {!isSupabaseConfigured ? (
-            <p className="mt-4 rounded-lg bg-yellow-50 p-3 text-sm font-bold text-yellow-800">
-              Falta configurar Supabase en el archivo .env para activar la nube.
-            </p>
-          ) : user ? (
-            <div className="mt-4 space-y-3">
-              <p className="truncate rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600">{user.mode === "code" ? `Codigo: ${user.email}` : user.email}</p>
-              <button onClick={onSignOut} className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-100 px-3 text-sm font-black text-slate-700">
-                <LogOut size={16} /> Cerrar sesion
+          <div className="mt-4 space-y-3">
+            <div className="rounded-lg bg-slate-50 p-3">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Ultima copia</p>
+              <p className="mt-1 text-sm font-black text-slate-700">{updatedLabel}</p>
+            </div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => runAction(onUploadCloud, "No se han podido subir los datos.")}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#172033] px-3 text-sm font-black text-white disabled:opacity-60"
+            >
+              <Upload size={16} /> Subir datos de este dispositivo
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => runAction(onDownloadCloud, "No se han podido actualizar los datos.")}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#dcebdc] px-3 text-sm font-black text-[#1f5d55] disabled:opacity-60"
+            >
+              <Download size={16} /> Actualizar desde la nube
+            </button>
+            <div className="grid grid-cols-2 gap-2 border-t border-slate-200 pt-3">
+              <button type="button" onClick={onExportBackup} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 text-xs font-black text-slate-700">
+                <Download size={15} /> Copia
+              </button>
+              <button type="button" onClick={() => importInputRef.current?.click()} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 text-xs font-black text-slate-700">
+                <Upload size={15} /> Importar
               </button>
             </div>
-          ) : (
-            <div className="mt-4 space-y-4">
-              <form onSubmit={connectCode} className="space-y-3 rounded-lg bg-slate-50 p-3">
-                <label className="block text-xs font-black uppercase tracking-[0.16em] text-slate-400">Codigo de sincronizacion</label>
-                <input value={syncCode} onChange={(event) => setSyncCode(event.target.value)} className="input" placeholder="CAMPUS-XXXXXX-XXXXXX" />
-                <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#172033] px-3 text-sm font-black text-white">
-                  <Cloud size={16} /> Conectar codigo
-                </button>
-                <p className="text-xs text-slate-500">Dejalo vacio para crear uno nuevo. Usa el mismo codigo en tus otros dispositivos.</p>
-              </form>
-
-              <form onSubmit={submit} className="space-y-3 border-t border-slate-200 pt-4">
-                <label className="block text-xs font-black uppercase tracking-[0.16em] text-slate-400">Email</label>
-                <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" className="input" placeholder="tu@email.com" />
-                <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-100 px-3 text-sm font-black text-slate-700">
-                  <Mail size={16} /> Enviar enlace
-                </button>
-              </form>
-              {error && <p className="text-sm font-bold text-red-600">{error}</p>}
-            </div>
-          )}
+            <input ref={importInputRef} type="file" accept="application/json,.json" className="hidden" onChange={importBackup} />
+            <p className="rounded-lg bg-yellow-50 p-3 text-xs font-bold text-yellow-800">
+              Puedes subir desde cualquier dispositivo. Hazlo solo cuando ese dispositivo tenga la version buena.
+            </p>
+            {error && <p className="text-sm font-bold text-red-600">{error}</p>}
+          </div>
         </div>
       )}
     </div>
