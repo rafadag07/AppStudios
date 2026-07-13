@@ -70,16 +70,31 @@ function encodeBase64(value) {
   return Buffer.from(value, "utf8").toString("base64");
 }
 
+async function readFileText(file, config) {
+  if (file.content && file.encoding === "base64") {
+    return decodeBase64(file.content);
+  }
+  if (file.git_url) {
+    const blob = await githubRequest(file.git_url, config.token);
+    if (blob.content && blob.encoding === "base64") {
+      return decodeBase64(blob.content);
+    }
+  }
+  throw new Error("GitHub no ha devuelto el contenido de la copia. Prueba a subirla de nuevo desde el dispositivo correcto.");
+}
+
 async function readCloudFile(config) {
   const url = `https://api.github.com/repos/${config.repo}/contents/${encodeURIComponent(config.path).replaceAll("%2F", "/")}?ref=${encodeURIComponent(config.branch)}`;
   try {
     const file = await githubRequest(url, config.token);
-    const parsed = JSON.parse(decodeBase64(file.content));
+    const text = await readFileText(file, config);
+    const parsed = JSON.parse(text);
+    const data = parsed.data || (parsed.subjects ? parsed : null);
     return {
       exists: true,
       sha: file.sha,
       updatedAt: parsed.updatedAt || null,
-      data: parsed.data || null,
+      data,
     };
   } catch (error) {
     if (error.status === 404) return { exists: false, sha: null, updatedAt: null, data: null };
