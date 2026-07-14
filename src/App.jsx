@@ -2792,6 +2792,16 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     saveDocument();
   };
 
+  const changeSelectedBlockTitleCase = (mode) => {
+    if (!selectedBlock) return;
+    const label = selectedBlock.querySelector(".study-block-label");
+    if (!label) return;
+    const nextText = mode === "upper" ? label.textContent.toLocaleUpperCase("es-ES") : label.textContent.toLocaleLowerCase("es-ES");
+    label.textContent = nextText;
+    window.requestAnimationFrame(() => updateBlockToolsPosition(selectedBlock));
+    saveDocument();
+  };
+
   const deleteSelectedBlock = () => {
     if (!selectedBlock) return;
     selectedBlock.remove();
@@ -3092,6 +3102,8 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
             <button type="button" onClick={() => resizeSelectedBlock("small")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">Pequeño</button>
             <button type="button" onClick={() => resizeSelectedBlock("normal")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">Normal</button>
             <button type="button" onClick={() => resizeSelectedBlock("large")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">Grande</button>
+            <button type="button" onClick={() => changeSelectedBlockTitleCase("upper")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">MAYÚS</button>
+            <button type="button" onClick={() => changeSelectedBlockTitleCase("lower")} className="h-9 rounded-lg bg-slate-100 px-3 text-xs font-black hover:bg-slate-200">minús</button>
             <EditorTool icon={Trash2} label="Eliminar bloque" onClick={deleteSelectedBlock} />
           </div>
         )}
