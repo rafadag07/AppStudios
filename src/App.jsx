@@ -64,7 +64,6 @@ const priorities = ["baja", "media", "alta"];
 const resourceTypes = ["link", "pdf", "video", "libro", "otro"];
 const POMODORO_HISTORY_KEY = "appstudios-pomodoro-history-v1";
 const LOCAL_DATA_UPDATED_KEY = "appstudios-local-data-updated-at";
-const MANUAL_SYNC_KEY = "appstudios-manual-sync-key";
 const subjectSections = [
   { id: "teoria", label: "Teoría" },
   { id: "seminarios", label: "Seminarios" },
@@ -96,7 +95,7 @@ function base64ToUint8Array(value) {
 }
 
 async function compressDataForCloud(data) {
-  if (!("CompressionStream" in window)) return null;
+  if (typeof window === "undefined" || !("CompressionStream" in window)) return null;
   const stream = new CompressionStream("gzip");
   const writer = stream.writable.getWriter();
   await writer.write(new TextEncoder().encode(JSON.stringify(data)));
@@ -339,46 +338,33 @@ function App() {
   const initialLocalWriteRef = useRef(true);
   const pomodoro = useGlobalPomodoro(data);
 
-  const getManualSyncKey = () => {
-    const current = localStorage.getItem(MANUAL_SYNC_KEY);
-    if (current) return current;
-    const next = window.prompt("Introduce la clave de sincronizacion manual de AppStudios. Se guardara solo en este dispositivo.");
-    if (next?.trim()) {
-      localStorage.setItem(MANUAL_SYNC_KEY, next.trim());
-      return next.trim();
-    }
-    return "";
-  };
-
-  const changeManualSyncKey = () => {
-    const next = window.prompt("Introduce la clave de sincronizacion manual de AppStudios.");
-    if (next?.trim()) {
-      localStorage.setItem(MANUAL_SYNC_KEY, next.trim());
-      setSyncStatus("Clave guardada. Prueba ahora la nube.");
-    }
-  };
-
-  const syncRequest = async (options = {}, retryWithKey = true) => {
-    const syncKey = localStorage.getItem(MANUAL_SYNC_KEY) || "";
-    const response = await fetch("/api/appstudios-sync", {
+  const syncRequest = async (options = {}) => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 45000);
+    let response;
+    try {
+      response = await fetch("/api/appstudios-sync", {
       ...options,
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
-        ...(syncKey ? { "x-appstudios-sync-key": syncKey } : {}),
         ...(options.headers || {}),
       },
-    });
+      });
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("La nube ha tardado demasiado. Prueba otra vez; si pasa de nuevo, usa Copia/Importar.");
+      }
+      throw new Error("No se ha podido conectar con la nube manual. Revisa internet o prueba de nuevo.");
+    } finally {
+      window.clearTimeout(timeout);
+    }
     const responseText = await response.text();
     let payload = {};
     try {
       payload = responseText ? JSON.parse(responseText) : {};
     } catch {
       payload = {};
-    }
-    if (response.status === 401 && retryWithKey) {
-      localStorage.removeItem(MANUAL_SYNC_KEY);
-      const nextKey = getManualSyncKey();
-      if (nextKey) return syncRequest(options, false);
     }
     if (!response.ok) {
       throw new Error(payload.error || responseText || `No se ha podido conectar con la nube manual (${response.status}).`);
@@ -406,9 +392,12 @@ function App() {
     setSyncStatus("Subiendo datos");
     try {
       const compressedData = await compressDataForCloud(latestDataRef.current);
+      if (!compressedData) {
+        throw new Error("Este navegador no puede comprimir una copia grande. Usa Copia/Importar o actualiza el navegador.");
+      }
       const result = await syncRequest({
         method: "POST",
-        body: JSON.stringify(compressedData ? { compressedData } : { data: latestDataRef.current }),
+        body: JSON.stringify({ compressedData }),
       });
       setCloudInfo(result);
       localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
@@ -533,7 +522,6 @@ function App() {
         syncBusy={syncBusy}
         onUploadCloud={uploadManualCloud}
         onDownloadCloud={downloadManualCloud}
-        onChangeCloudKey={changeManualSyncKey}
         onExportBackup={exportLocalBackup}
         onImportBackup={importLocalBackup}
       >
@@ -600,7 +588,6 @@ function Shell({
   syncBusy,
   onUploadCloud,
   onDownloadCloud,
-  onChangeCloudKey,
   onExportBackup,
   onImportBackup,
 }) {
@@ -629,7 +616,6 @@ function Shell({
           syncBusy={syncBusy}
           onUploadCloud={onUploadCloud}
           onDownloadCloud={onDownloadCloud}
-          onChangeCloudKey={onChangeCloudKey}
           onExportBackup={onExportBackup}
           onImportBackup={onImportBackup}
         />
@@ -654,7 +640,6 @@ function Shell({
               syncBusy={syncBusy}
               onUploadCloud={onUploadCloud}
               onDownloadCloud={onDownloadCloud}
-              onChangeCloudKey={onChangeCloudKey}
               onExportBackup={onExportBackup}
               onImportBackup={onImportBackup}
             />
@@ -690,7 +675,6 @@ function Shell({
               busy={syncBusy}
               onUploadCloud={onUploadCloud}
               onDownloadCloud={onDownloadCloud}
-              onChangeCloudKey={onChangeCloudKey}
               onExportBackup={onExportBackup}
               onImportBackup={onImportBackup}
             />
@@ -705,7 +689,6 @@ function Shell({
           busy={syncBusy}
           onUploadCloud={onUploadCloud}
           onDownloadCloud={onDownloadCloud}
-          onChangeCloudKey={onChangeCloudKey}
           onExportBackup={onExportBackup}
           onImportBackup={onImportBackup}
           mobile
@@ -715,7 +698,7 @@ function Shell({
   );
 }
 
-function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, syncBusy, onUploadCloud, onDownloadCloud, onChangeCloudKey, onExportBackup, onImportBackup }) {
+function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, syncBusy, onUploadCloud, onDownloadCloud, onExportBackup, onImportBackup }) {
   return (
     <>
       <button onClick={() => setView({ page: "dashboard" })} className="mb-8 flex items-center gap-3 text-left">
@@ -748,7 +731,6 @@ function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, s
           busy={syncBusy}
           onUploadCloud={onUploadCloud}
           onDownloadCloud={onDownloadCloud}
-          onChangeCloudKey={onChangeCloudKey}
           onExportBackup={onExportBackup}
           onImportBackup={onImportBackup}
           full
@@ -773,7 +755,7 @@ function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, s
   );
 }
 
-function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadCloud, onChangeCloudKey, onExportBackup, onImportBackup, full = false, mobile = false }) {
+function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadCloud, onExportBackup, onImportBackup, full = false, mobile = false }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   const importInputRef = useRef(null);

@@ -1,5 +1,3 @@
-import { gunzipSync } from "node:zlib";
-
 const DEFAULT_REPO = "rafadag07/AppStudios";
 const DEFAULT_BRANCH = "main";
 const DEFAULT_PATH = "appstudios-cloud/data.json";
@@ -59,11 +57,6 @@ function decodeBase64(content = "") {
 
 function encodeBase64(value) {
   return Buffer.from(value, "utf8").toString("base64");
-}
-
-function decodeGzipJson(base64Value = "") {
-  const buffer = Buffer.from(base64Value, "base64");
-  return JSON.parse(gunzipSync(buffer).toString("utf8"));
 }
 
 async function readFileText(file, config) {
@@ -137,11 +130,12 @@ export default async function handler(req, res) {
 
     if (req.method === "POST") {
       const body = parseBody(req);
-      const data = body.data || (body.compressedData ? decodeGzipJson(body.compressedData) : null);
-      if (!data?.subjects || !Array.isArray(data.subjects)) {
+      const data = body.data || null;
+      const compressedData = typeof body.compressedData === "string" ? body.compressedData : null;
+      if (!compressedData && (!data?.subjects || !Array.isArray(data.subjects))) {
         return sendJson(res, { error: "Los datos recibidos no son una copia valida de AppStudios." }, 400);
       }
-      const result = await writeCloudFile(config, data, body.compressedData || null);
+      const result = await writeCloudFile(config, data, compressedData);
       return sendJson(res, result);
     }
 
