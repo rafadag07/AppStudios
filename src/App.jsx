@@ -308,6 +308,14 @@ function App() {
     return "";
   };
 
+  const changeManualSyncKey = () => {
+    const next = window.prompt("Introduce la clave de sincronizacion manual de AppStudios.");
+    if (next?.trim()) {
+      localStorage.setItem(MANUAL_SYNC_KEY, next.trim());
+      setSyncStatus("Clave guardada. Prueba ahora la nube.");
+    }
+  };
+
   const syncRequest = async (options = {}, retryWithKey = true) => {
     const syncKey = localStorage.getItem(MANUAL_SYNC_KEY) || "";
     const response = await fetch("/api/appstudios-sync", {
@@ -320,6 +328,7 @@ function App() {
     });
     const payload = await response.json().catch(() => ({}));
     if (response.status === 401 && retryWithKey) {
+      localStorage.removeItem(MANUAL_SYNC_KEY);
       const nextKey = getManualSyncKey();
       if (nextKey) return syncRequest(options, false);
     }
@@ -472,6 +481,7 @@ function App() {
         syncBusy={syncBusy}
         onUploadCloud={uploadManualCloud}
         onDownloadCloud={downloadManualCloud}
+        onChangeCloudKey={changeManualSyncKey}
         onExportBackup={exportLocalBackup}
         onImportBackup={importLocalBackup}
       >
@@ -538,6 +548,7 @@ function Shell({
   syncBusy,
   onUploadCloud,
   onDownloadCloud,
+  onChangeCloudKey,
   onExportBackup,
   onImportBackup,
 }) {
@@ -566,6 +577,7 @@ function Shell({
           syncBusy={syncBusy}
           onUploadCloud={onUploadCloud}
           onDownloadCloud={onDownloadCloud}
+          onChangeCloudKey={onChangeCloudKey}
           onExportBackup={onExportBackup}
           onImportBackup={onImportBackup}
         />
@@ -590,6 +602,7 @@ function Shell({
               syncBusy={syncBusy}
               onUploadCloud={onUploadCloud}
               onDownloadCloud={onDownloadCloud}
+              onChangeCloudKey={onChangeCloudKey}
               onExportBackup={onExportBackup}
               onImportBackup={onImportBackup}
             />
@@ -625,6 +638,7 @@ function Shell({
               busy={syncBusy}
               onUploadCloud={onUploadCloud}
               onDownloadCloud={onDownloadCloud}
+              onChangeCloudKey={onChangeCloudKey}
               onExportBackup={onExportBackup}
               onImportBackup={onImportBackup}
             />
@@ -639,6 +653,7 @@ function Shell({
           busy={syncBusy}
           onUploadCloud={onUploadCloud}
           onDownloadCloud={onDownloadCloud}
+          onChangeCloudKey={onChangeCloudKey}
           onExportBackup={onExportBackup}
           onImportBackup={onImportBackup}
           mobile
@@ -648,7 +663,7 @@ function Shell({
   );
 }
 
-function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, syncBusy, onUploadCloud, onDownloadCloud, onExportBackup, onImportBackup }) {
+function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, syncBusy, onUploadCloud, onDownloadCloud, onChangeCloudKey, onExportBackup, onImportBackup }) {
   return (
     <>
       <button onClick={() => setView({ page: "dashboard" })} className="mb-8 flex items-center gap-3 text-left">
@@ -681,6 +696,7 @@ function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, s
           busy={syncBusy}
           onUploadCloud={onUploadCloud}
           onDownloadCloud={onDownloadCloud}
+          onChangeCloudKey={onChangeCloudKey}
           onExportBackup={onExportBackup}
           onImportBackup={onImportBackup}
           full
@@ -705,7 +721,7 @@ function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, s
   );
 }
 
-function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadCloud, onExportBackup, onImportBackup, full = false, mobile = false }) {
+function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadCloud, onChangeCloudKey, onExportBackup, onImportBackup, full = false, mobile = false }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   const importInputRef = useRef(null);
@@ -771,6 +787,14 @@ function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadClo
               className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#dcebdc] px-3 text-sm font-black text-[#1f5d55] disabled:opacity-60"
             >
               <Download size={16} /> Actualizar desde la nube
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onChangeCloudKey}
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 text-xs font-black text-slate-700 disabled:opacity-60"
+            >
+              Cambiar clave de sincronizacion
             </button>
             <div className="grid grid-cols-2 gap-2 border-t border-slate-200 pt-3">
               <button type="button" onClick={onExportBackup} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 text-xs font-black text-slate-700">
