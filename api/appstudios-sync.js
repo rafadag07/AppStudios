@@ -1,3 +1,5 @@
+import { gunzipSync } from "node:zlib";
+
 const DEFAULT_REPO = "rafadag07/AppStudios";
 const DEFAULT_BRANCH = "main";
 const DEFAULT_PATH = "appstudios-cloud/data.json";
@@ -59,6 +61,11 @@ function encodeBase64(value) {
   return Buffer.from(value, "utf8").toString("base64");
 }
 
+function decodeGzipJson(base64Value = "") {
+  const buffer = Buffer.from(base64Value, "base64");
+  return JSON.parse(gunzipSync(buffer).toString("utf8"));
+}
+
 async function readFileText(file, config) {
   if (file.content && file.encoding === "base64") {
     return decodeBase64(file.content);
@@ -84,6 +91,8 @@ async function readCloudFile(config) {
       sha: file.sha,
       updatedAt: parsed.updatedAt || null,
       data,
+      compressedData: parsed.compressedData || null,
+      encoding: parsed.encoding || null,
     };
   } catch (error) {
     if (error.status === 404) return { exists: false, sha: null, updatedAt: null, data: null };
@@ -91,13 +100,13 @@ async function readCloudFile(config) {
   }
 }
 
-async function writeCloudFile(config, data) {
+async function writeCloudFile(config, data, compressedData = null) {
   const current = await readCloudFile(config);
   const updatedAt = new Date().toISOString();
   const payload = {
     app: "AppStudios",
     updatedAt,
-    data,
+    ...(compressedData ? { encoding: "gzip-base64-json", compressedData } : { data }),
   };
   const url = `https://api.github.com/repos/${config.repo}/contents/${encodeURIComponent(config.path).replaceAll("%2F", "/")}`;
   const body = {
@@ -111,7 +120,7 @@ async function writeCloudFile(config, data) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  return { ok: true, updatedAt, data };
+  return { ok: true, updatedAt };
 }
 
 export default async function handler(req, res) {
@@ -128,11 +137,11 @@ export default async function handler(req, res) {
 
     if (req.method === "POST") {
       const body = parseBody(req);
-      const data = body.data;
+      const data = body.data || (body.compressedData ? decodeGzipJson(body.compressedData) : null);
       if (!data?.subjects || !Array.isArray(data.subjects)) {
         return sendJson(res, { error: "Los datos recibidos no son una copia valida de AppStudios." }, 400);
       }
-      const result = await writeCloudFile(config, data);
+      const result = await writeCloudFile(config, data, body.compressedData || null);
       return sendJson(res, result);
     }
 

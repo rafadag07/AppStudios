@@ -75,6 +75,48 @@ const subjectSections = [
 const defaultStudySections = subjectSections.filter((section) => section.id !== "preguntas");
 const questionsSection = subjectSections.find((section) => section.id === "preguntas");
 
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function base64ToUint8Array(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+async function compressDataForCloud(data) {
+  if (!("CompressionStream" in window)) return null;
+  const stream = new CompressionStream("gzip");
+  const writer = stream.writable.getWriter();
+  await writer.write(new TextEncoder().encode(JSON.stringify(data)));
+  await writer.close();
+  const compressed = await new Response(stream.readable).arrayBuffer();
+  return arrayBufferToBase64(compressed);
+}
+
+async function decompressCloudData(compressedData) {
+  if (!("DecompressionStream" in window)) {
+    throw new Error("Este navegador no puede descomprimir la copia de la nube. Actualiza el navegador o usa Copia/Importar.");
+  }
+  const stream = new DecompressionStream("gzip");
+  const writer = stream.writable.getWriter();
+  await writer.write(base64ToUint8Array(compressedData));
+  await writer.close();
+  const text = await new Response(stream.readable).text();
+  return JSON.parse(text);
+}
+
 function getSubjectStudySections(subject) {
   const sections = subject?.studySections?.length ? subject.studySections : defaultStudySections;
   return sections.map((section) => ({ ...section }));
@@ -326,14 +368,23 @@ function App() {
         ...(options.headers || {}),
       },
     });
-    const payload = await response.json().catch(() => ({}));
+    const responseText = await response.text();
+    let payload = {};
+    try {
+      payload = responseText ? JSON.parse(responseText) : {};
+    } catch {
+      payload = {};
+    }
     if (response.status === 401 && retryWithKey) {
       localStorage.removeItem(MANUAL_SYNC_KEY);
       const nextKey = getManualSyncKey();
       if (nextKey) return syncRequest(options, false);
     }
     if (!response.ok) {
-      throw new Error(payload.error || "No se ha podido conectar con la nube manual.");
+      throw new Error(payload.error || responseText || `No se ha podido conectar con la nube manual (${response.status}).`);
+    }
+    if (!payload.data && payload.compressedData) {
+      payload.data = await decompressCloudData(payload.compressedData);
     }
     return payload;
   };
@@ -354,9 +405,10 @@ function App() {
     setSyncBusy(true);
     setSyncStatus("Subiendo datos");
     try {
+      const compressedData = await compressDataForCloud(latestDataRef.current);
       const result = await syncRequest({
         method: "POST",
-        body: JSON.stringify({ data: latestDataRef.current }),
+        body: JSON.stringify(compressedData ? { compressedData } : { data: latestDataRef.current }),
       });
       setCloudInfo(result);
       localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
