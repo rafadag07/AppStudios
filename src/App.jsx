@@ -788,14 +788,6 @@ function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadClo
             >
               <Download size={16} /> Actualizar desde la nube
             </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={onChangeCloudKey}
-              className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 text-xs font-black text-slate-700 disabled:opacity-60"
-            >
-              Cambiar clave de sincronizacion
-            </button>
             <div className="grid grid-cols-2 gap-2 border-t border-slate-200 pt-3">
               <button type="button" onClick={onExportBackup} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 text-xs font-black text-slate-700">
                 <Download size={15} /> Copia

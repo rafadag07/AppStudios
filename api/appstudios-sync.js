@@ -15,18 +15,7 @@ function getConfig() {
     repo: process.env.GITHUB_SYNC_REPO || DEFAULT_REPO,
     branch: process.env.GITHUB_SYNC_BRANCH || DEFAULT_BRANCH,
     path: process.env.GITHUB_SYNC_PATH || DEFAULT_PATH,
-    password: process.env.APPSTUDIOS_SYNC_PASSWORD || "",
   };
-}
-
-function assertAuthorized(req, res, password) {
-  if (!password) return null;
-  const provided = req.headers["x-appstudios-sync-key"] || "";
-  if (provided !== password) {
-    sendJson(res, { error: "Necesitas la clave de sincronizacion manual." }, 401);
-    return true;
-  }
-  return null;
 }
 
 function parseBody(req) {
@@ -130,8 +119,6 @@ export default async function handler(req, res) {
   if (!config.token) {
     return sendJson(res, { error: "Falta configurar GITHUB_SYNC_TOKEN en Vercel." }, 500);
   }
-
-  if (assertAuthorized(req, res, config.password)) return;
 
   try {
     if (req.method === "GET") {
