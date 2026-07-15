@@ -2327,6 +2327,10 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     onChange(editorRef.current?.innerHTML || "");
   };
 
+  const saveDocumentLight = () => {
+    onChange(editorRef.current?.innerHTML || "");
+  };
+
   const refreshToc = () => {
     if (!editorRef.current) return;
     updateDocumentToc(editorRef.current);
@@ -2716,8 +2720,9 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const handleEditorBlur = (event) => {
     const codeContent = event.target?.closest?.(".study-code-content");
     if (!codeContent || !editorRef.current?.contains(codeContent)) return;
+    codeContent.dataset.rawCode = codeContent.innerText.replace(/\n$/, "");
     highlightCodeElement(codeContent);
-    saveDocument();
+    saveDocumentLight();
   };
 
   const handleEditorKeyDown = (event) => {
@@ -3203,7 +3208,14 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
           ref={editorRef}
           contentEditable
           suppressContentEditableWarning
-          onInput={() => {
+          onInput={(event) => {
+            const codeContent = event.target?.closest?.(".study-code-content");
+            if (codeContent && editorRef.current?.contains(codeContent)) {
+              codeContent.dataset.rawCode = codeContent.innerText.replace(/\n$/, "");
+              saveSelection();
+              saveDocumentLight();
+              return;
+            }
             saveSelection();
             saveDocument();
           }}
@@ -5016,15 +5028,21 @@ function highlightCodeBlocks(root) {
 
 function unhighlightCodeElement(codeElement) {
   if (!codeElement) return;
-  codeElement.textContent = codeElement.innerText.replace(/\n$/, "");
+  codeElement.textContent = (codeElement.dataset.rawCode || codeElement.innerText || "").replace(/\n$/, "");
 }
 
 function highlightCodeElement(codeElement) {
   if (!codeElement) return;
   const block = codeElement.closest(".study-code-block");
   const language = block?.dataset.codeLanguage || "Texto plano";
-  const rawCode = codeElement.innerText.replace(/\n$/, "");
-  codeElement.innerHTML = highlightCodeSyntax(rawCode, language);
+  const rawCode = (codeElement.dataset.rawCode || codeElement.innerText || "").replace(/\n$/, "");
+  codeElement.dataset.rawCode = rawCode;
+  try {
+    codeElement.innerHTML = highlightCodeSyntax(rawCode, language);
+  } catch (error) {
+    console.error(error);
+    codeElement.textContent = rawCode;
+  }
 }
 
 function highlightCodeSyntax(code = "", language = "Texto plano") {
