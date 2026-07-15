@@ -2433,6 +2433,25 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     return !block.textContent.replace(/\u00a0/g, " ").trim();
   };
 
+  const placeCaretAtStart = (block) => {
+    if (!block) return;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(block);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    savedRangeRef.current = range.cloneRange();
+  };
+
+  const caretIsAtStartOfBlock = (block, range) => {
+    if (!block || !range) return false;
+    const before = document.createRange();
+    before.selectNodeContents(block);
+    before.setEnd(range.startContainer, range.startOffset);
+    return !before.toString().replace(/\u00a0/g, " ").trim();
+  };
+
   const insertEmptyLineAfter = (block, indentLevel) => {
     const line = document.createElement("div");
     if (indentLevel > 0) {
@@ -2441,13 +2460,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     }
     line.appendChild(document.createElement("br"));
     block?.after(line);
-    const range = document.createRange();
-    range.setStart(line, 0);
-    range.collapse(true);
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-    savedRangeRef.current = range.cloneRange();
+    placeCaretAtStart(line);
   };
 
   const insertHtml = (html) => {
@@ -2712,12 +2725,27 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     const codeContent = event.target?.closest?.(".study-code-content");
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
 
     if (event.key === "Enter" && !event.shiftKey && !codeContent) {
       const block = getCurrentEditableBlock();
       const indentLevel = getIndentLevel(block);
-      event.preventDefault();
+      if (block?.tagName?.toLowerCase() === "li") {
+        window.setTimeout(() => {
+          saveSelection();
+          saveDocument();
+        }, 0);
+        return;
+      }
+      if (indentLevel <= 0) {
+        window.setTimeout(() => {
+          saveSelection();
+          saveDocument();
+        }, 0);
+        return;
+      }
       const topLevelBlock = getTopLevelEditorBlock(selection.anchorNode);
+      event.preventDefault();
       if (isEmptyEditorLine(topLevelBlock)) {
         insertEmptyLineAfter(topLevelBlock, indentLevel);
         saveDocument();
@@ -2731,15 +2759,17 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
 
     if ((event.key === "Backspace" || event.key === "Delete") && !codeContent) {
       const topLevelBlock = getTopLevelEditorBlock(selection.anchorNode);
-      if (isEmptyEditorLine(topLevelBlock) && getIndentLevel(topLevelBlock) > 0) {
+      const currentBlock = getCurrentEditableBlock();
+      const indentedBlock = getIndentLevel(topLevelBlock) > 0 ? topLevelBlock : currentBlock;
+      if (
+        event.key === "Backspace" &&
+        selection.isCollapsed &&
+        getIndentLevel(indentedBlock) > 0 &&
+        (isEmptyEditorLine(indentedBlock) || caretIsAtStartOfBlock(indentedBlock, range))
+      ) {
         event.preventDefault();
-        applyBlockIndent(topLevelBlock, 0);
-        const range = document.createRange();
-        range.setStart(topLevelBlock, 0);
-        range.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(range);
-        savedRangeRef.current = range.cloneRange();
+        applyBlockIndent(indentedBlock, 0);
+        placeCaretAtStart(indentedBlock);
         saveDocument();
         return;
       }
@@ -2754,7 +2784,6 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
       saveDocument();
       return;
     }
-    const range = selection.getRangeAt(0);
     range.deleteContents();
     const tab = document.createTextNode("  ");
     range.insertNode(tab);
