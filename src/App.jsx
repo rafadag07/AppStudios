@@ -2774,6 +2774,25 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     if (!selection || selection.rangeCount === 0) return;
     const range = selection.getRangeAt(0);
 
+    if (event.key === "Enter" && codeContent) {
+      event.preventDefault();
+      const rawCode = getCodePlainText(codeContent);
+      const offsets = getSelectionOffsetsWithin(codeContent);
+      const start = offsets?.start ?? rawCode.length;
+      const end = offsets?.end ?? start;
+      const currentLine = rawCode.slice(rawCode.lastIndexOf("\n", Math.max(0, start - 1)) + 1, start);
+      const indentation = currentLine.match(/^[\t ]*/)?.[0] || "";
+      const insertedText = `\n${indentation}`;
+      const nextCode = `${rawCode.slice(0, start)}${insertedText}${rawCode.slice(end)}`;
+
+      codeContent.textContent = nextCode;
+      restoreCaretOffsetWithin(codeContent, start + insertedText.length);
+      highlightCodeElement(codeContent, { preserveSelection: true });
+      saveSelection();
+      saveDocumentLight();
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey && !codeContent) {
       const block = getCurrentEditableBlock();
       const indentLevel = getIndentLevel(block);
@@ -5096,9 +5115,33 @@ function unhighlightCodeElement(codeElement) {
   delete codeElement.dataset.rawCode;
 }
 
+const CODE_CARET_PLACEHOLDER = "\u200B";
+
 function getCodePlainText(codeElement) {
   if (!codeElement) return "";
-  return (codeElement.dataset.rawCode || codeElement.innerText || codeElement.textContent || "").replace(/\n$/, "");
+  return (codeElement.dataset.rawCode ?? codeElement.textContent ?? codeElement.innerText ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replaceAll(CODE_CARET_PLACEHOLDER, "");
+}
+
+function getSelectionOffsetsWithin(element) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!element.contains(range.startContainer) || !element.contains(range.endContainer)) return null;
+
+  const startRange = range.cloneRange();
+  startRange.selectNodeContents(element);
+  startRange.setEnd(range.startContainer, range.startOffset);
+
+  const endRange = range.cloneRange();
+  endRange.selectNodeContents(element);
+  endRange.setEnd(range.endContainer, range.endOffset);
+
+  return {
+    start: startRange.toString().replaceAll(CODE_CARET_PLACEHOLDER, "").length,
+    end: endRange.toString().replaceAll(CODE_CARET_PLACEHOLDER, "").length,
+  };
 }
 
 function getCaretOffsetWithin(element) {
@@ -5108,7 +5151,7 @@ function getCaretOffsetWithin(element) {
   const before = range.cloneRange();
   before.selectNodeContents(element);
   before.setEnd(range.endContainer, range.endOffset);
-  return before.toString().length;
+  return before.toString().replaceAll(CODE_CARET_PLACEHOLDER, "").length;
 }
 
 function restoreCaretOffsetWithin(element, offset) {
@@ -5167,7 +5210,8 @@ function highlightCodeSyntax(code = "", language = "Texto plano") {
     lastIndex = match.index + token.length;
   }
   output += escapeHtml(code.slice(lastIndex));
-  return output || "Escribe aqui tu codigo...";
+  if (!output) return "Escribe aqui tu codigo...";
+  return code.endsWith("\n") ? `${output}${CODE_CARET_PLACEHOLDER}` : output;
 }
 
 function renderCodeToken(token, keywords, isFunction = false) {
