@@ -5260,16 +5260,7 @@ async function exportThemeVisualPdf(subject, theme, options = { includeToc: true
     const fullDocument = await buildContinuousPdfDocument(exportShell, sourceDocument, subject, theme);
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const canvas = await html2canvas(fullDocument, {
-      backgroundColor: "#ffffff",
-      scale: 1.8,
-      useCORS: true,
-      logging: false,
-      windowWidth: 1120,
-      height: fullDocument.scrollHeight,
-    });
-    addCanvasPagesToPdf(pdf, canvas, pageWidth, pageHeight);
-
+    await addDocumentBlocksToPdf(pdf, fullDocument, pageWidth, pageHeight);
     addPageNumbers(pdf);
     pdf.save(`${safeFileName(subject.name)}-${safeFileName(theme.name)}.pdf`);
   } finally {
@@ -5291,8 +5282,6 @@ async function buildContinuousPdfDocument(exportShell, sourceDocument, subject, 
 
   await waitForExportNodeLayout(fullDocument);
   fitLargePdfImages(fullDocument);
-  await waitForExportNodeLayout(fullDocument);
-  insertPdfPageBreakSpacers(fullDocument);
   await waitForExportNodeLayout(fullDocument);
   return fullDocument;
 }
@@ -5334,46 +5323,73 @@ function fitLargePdfImages(documentNode) {
   });
 }
 
-function insertPdfPageBreakSpacers(documentNode) {
-  const pageHeight = 1414;
-  const bottomGuard = 110;
-  const candidates = Array.from(documentNode.children).filter((node) => !node.dataset.exportHeader && !node.dataset.pdfSpacer);
+async function addDocumentBlocksToPdf(pdf, documentNode, pageWidth, pageHeight) {
+  const margin = 14;
+  const footerSpace = 11;
+  const gap = 5;
+  const contentWidth = pageWidth - margin * 2;
+  const contentHeight = pageHeight - margin * 2 - footerSpace;
+  let y = margin;
+  let pageIsEmpty = true;
+  const blocks = Array.from(documentNode.children).filter((node) => !node.dataset.pdfSpacer);
 
-  candidates.forEach((node) => {
-    const rect = node.getBoundingClientRect();
-    const top = node.offsetTop;
-    const height = rect.height;
-    if (!height || height >= pageHeight - 220) return;
-    const positionInPage = top % pageHeight;
-    if (positionInPage + height > pageHeight - bottomGuard) {
-      const spacerHeight = pageHeight - positionInPage;
-      const spacer = document.createElement("div");
-      spacer.dataset.pdfSpacer = "true";
-      spacer.style.height = `${spacerHeight}px`;
-      spacer.style.breakAfter = "page";
-      spacer.style.pageBreakAfter = "always";
-      node.parentNode.insertBefore(spacer, node);
+  for (const block of blocks) {
+    const canvas = await html2canvas(block, {
+      backgroundColor: "#ffffff",
+      scale: 1.9,
+      useCORS: true,
+      logging: false,
+      windowWidth: 1120,
+    });
+    if (!canvas.width || !canvas.height) continue;
+    const renderedHeight = canvas.height * (contentWidth / canvas.width);
+
+    if (renderedHeight <= contentHeight) {
+      if (!pageIsEmpty && y + renderedHeight > margin + contentHeight) {
+        pdf.addPage();
+        y = margin;
+        pageIsEmpty = true;
+      }
+      pdf.addImage(canvas.toDataURL("image/png", 1), "PNG", margin, y, contentWidth, renderedHeight);
+      y += renderedHeight + gap;
+      pageIsEmpty = false;
+      continue;
     }
-  });
+
+    if (!pageIsEmpty) {
+      pdf.addPage();
+      y = margin;
+      pageIsEmpty = true;
+    }
+    y = addTallCanvasToPdf(pdf, canvas, margin, y, contentWidth, contentHeight, gap);
+    pageIsEmpty = false;
+  }
 }
 
-function addCanvasPagesToPdf(pdf, canvas, pageWidth, pageHeight) {
-  const pageCanvasHeight = Math.floor(canvas.width * (pageHeight / pageWidth));
-  const pageCount = Math.max(1, Math.ceil(canvas.height / pageCanvasHeight));
-  const pageCanvas = document.createElement("canvas");
-  const ctx = pageCanvas.getContext("2d");
-  pageCanvas.width = canvas.width;
-  pageCanvas.height = pageCanvasHeight;
+function addTallCanvasToPdf(pdf, canvas, margin, startY, contentWidth, contentHeight, gap) {
+  const pageCanvasHeight = Math.floor(canvas.width * (contentHeight / contentWidth));
+  const sliceCanvas = document.createElement("canvas");
+  const ctx = sliceCanvas.getContext("2d");
+  sliceCanvas.width = canvas.width;
+  sliceCanvas.height = pageCanvasHeight;
 
-  for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
-    if (pageIndex > 0) pdf.addPage();
+  let sourceY = 0;
+  let firstSlice = true;
+  let finalY = margin;
+  while (sourceY < canvas.height) {
+    if (!firstSlice) pdf.addPage();
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-    const sourceY = pageIndex * pageCanvasHeight;
+    ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
     const sliceHeight = Math.min(pageCanvasHeight, canvas.height - sourceY);
-    ctx.drawImage(canvas, 0, sourceY, canvas.width, sliceHeight, 0, 0, pageCanvas.width, sliceHeight);
-    pdf.addImage(pageCanvas.toDataURL("image/png", 1), "PNG", 0, 0, pageWidth, pageHeight);
+    ctx.drawImage(canvas, 0, sourceY, canvas.width, sliceHeight, 0, 0, sliceCanvas.width, sliceHeight);
+    const pdfSliceHeight = sliceHeight * (contentWidth / canvas.width);
+    const sliceY = firstSlice ? startY : margin;
+    pdf.addImage(sliceCanvas.toDataURL("image/png", 1), "PNG", margin, sliceY, contentWidth, pdfSliceHeight);
+    finalY = sliceY + pdfSliceHeight + gap;
+    sourceY += sliceHeight;
+    firstSlice = false;
   }
+  return finalY;
 }
 
 function prepareNodeForPdfExport(node) {
