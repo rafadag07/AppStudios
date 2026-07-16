@@ -478,15 +478,20 @@ function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    if (initialLocalWriteRef.current) {
-      initialLocalWriteRef.current = false;
-      if (hadStoredDataRef.current && !localStorage.getItem(LOCAL_DATA_UPDATED_KEY)) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      if (initialLocalWriteRef.current) {
+        initialLocalWriteRef.current = false;
+        if (hadStoredDataRef.current && !localStorage.getItem(LOCAL_DATA_UPDATED_KEY)) {
+          localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
+        }
+      } else {
+        hadStoredDataRef.current = true;
         localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
       }
-    } else {
-      hadStoredDataRef.current = true;
-      localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
+    } catch (error) {
+      console.error(error);
+      setSyncStatus("No se ha podido guardar en este navegador. Exporta una copia para no perder datos.");
     }
   }, [data]);
 
@@ -2720,8 +2725,9 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const handleEditorBlur = (event) => {
     const codeContent = event.target?.closest?.(".study-code-content");
     if (!codeContent || !editorRef.current?.contains(codeContent)) return;
-    codeContent.dataset.rawCode = codeContent.innerText.replace(/\n$/, "");
-    highlightCodeElement(codeContent);
+    const rawCode = codeContent.innerText.replace(/\n$/, "");
+    codeContent.textContent = rawCode;
+    delete codeContent.dataset.rawCode;
     saveDocumentLight();
   };
 
@@ -3211,7 +3217,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
           onInput={(event) => {
             const codeContent = event.target?.closest?.(".study-code-content");
             if (codeContent && editorRef.current?.contains(codeContent)) {
-              codeContent.dataset.rawCode = codeContent.innerText.replace(/\n$/, "");
+              delete codeContent.dataset.rawCode;
               saveSelection();
               saveDocumentLight();
               return;
@@ -5007,6 +5013,17 @@ function normalizeEditableBlocks(editor) {
         label.spellcheck = false;
       }
       if (body) body.contentEditable = "true";
+    }
+    if (block.classList.contains("study-code-block")) {
+      const code = block.querySelector(".study-code-content");
+      if (code) {
+        code.contentEditable = "true";
+        code.spellcheck = false;
+        if (code.dataset.rawCode || code.querySelector(".code-token-keyword, .code-token-function, .code-token-variable, .code-token-string, .code-token-number, .code-token-comment, .code-token-operator")) {
+          code.textContent = (code.dataset.rawCode || code.innerText || "").replace(/\n$/, "");
+          delete code.dataset.rawCode;
+        }
+      }
     }
   });
   editor.querySelectorAll(":scope > p, :scope > div:not(.auto-toc)").forEach((block) => {
