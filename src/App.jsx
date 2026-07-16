@@ -380,7 +380,7 @@ function App() {
     const total = Number(manifest?.chunks?.total || 0);
     const uploadId = manifest?.chunks?.uploadId;
     if (!uploadId || !total) throw new Error("La copia de nube esta incompleta. Sube los datos otra vez desde el dispositivo correcto.");
-    let compressedData = "";
+    let chunkedText = "";
     for (let index = 0; index < total; index += 1) {
       setSyncStatus(`Descargando parte ${index + 1}/${total}`);
       const part = await syncRequest({
@@ -388,9 +388,12 @@ function App() {
         path: `/api/appstudios-sync?uploadId=${encodeURIComponent(uploadId)}&chunk=${index}`,
       });
       if (typeof part.chunk !== "string") throw new Error(`No se ha podido leer la parte ${index + 1} de la nube.`);
-      compressedData += part.chunk;
+      chunkedText += part.chunk;
     }
-    return decompressCloudData(compressedData);
+    if (manifest.encoding === "gzip-base64-json-chunked") {
+      return decompressCloudData(chunkedText);
+    }
+    return JSON.parse(chunkedText);
   };
 
   const applyImportedData = (importedData, status = "Datos actualizados") => {
@@ -407,13 +410,11 @@ function App() {
   const uploadManualCloud = async () => {
     if (!window.confirm("Vas a subir los datos de ESTE dispositivo como copia principal. Usalo solo si aqui estan los datos correctos. Continuar?")) return;
     setSyncBusy(true);
-    setSyncStatus("Subiendo datos");
+    setSyncStatus("Preparando copia");
     try {
-      const compressedData = await compressDataForCloud(latestDataRef.current);
-      if (!compressedData) {
-        throw new Error("Este navegador no puede comprimir una copia grande. Usa Copia/Importar o actualiza el navegador.");
-      }
-      const total = Math.ceil(compressedData.length / CLOUD_CHUNK_SIZE);
+      await new Promise((resolve) => window.requestAnimationFrame(resolve));
+      const cloudData = JSON.stringify(latestDataRef.current);
+      const total = Math.ceil(cloudData.length / CLOUD_CHUNK_SIZE);
       const uploadId = `copy-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       for (let index = 0; index < total; index += 1) {
         setSyncStatus(`Subiendo parte ${index + 1}/${total}`);
@@ -424,14 +425,14 @@ function App() {
             uploadId,
             index,
             total,
-            chunk: compressedData.slice(index * CLOUD_CHUNK_SIZE, (index + 1) * CLOUD_CHUNK_SIZE),
+            chunk: cloudData.slice(index * CLOUD_CHUNK_SIZE, (index + 1) * CLOUD_CHUNK_SIZE),
           }),
         });
       }
       setSyncStatus("Finalizando copia");
       const result = await syncRequest({
         method: "POST",
-        body: JSON.stringify({ action: "finalize-chunks", uploadId, total }),
+        body: JSON.stringify({ action: "finalize-chunks", uploadId, total, encoding: "json-chunked" }),
       });
       setCloudInfo(result);
       localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
@@ -449,7 +450,8 @@ function App() {
     setSyncStatus("Buscando copia");
     try {
       const result = await syncRequest();
-      const downloadedData = result?.data || (result?.encoding === "gzip-base64-json-chunked" ? await readChunkedCloudData(result) : null);
+      const isChunked = result?.encoding === "gzip-base64-json-chunked" || result?.encoding === "json-chunked";
+      const downloadedData = result?.data || (isChunked ? await readChunkedCloudData(result) : null);
       if (!downloadedData) throw new Error("No hay copia guardada en la nube manual.");
       const when = result.updatedAt ? new Date(result.updatedAt).toLocaleString("es-ES") : "fecha desconocida";
       if (!window.confirm(`Esto sustituira los datos de este dispositivo por la copia de la nube (${when}). Continuar?`)) {

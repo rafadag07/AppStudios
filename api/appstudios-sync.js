@@ -144,13 +144,13 @@ async function writeTextPath(config, path, text, message) {
   });
 }
 
-async function writeCloudFile(config, data, compressedData = null, chunks = null) {
+async function writeCloudFile(config, data, compressedData = null, chunks = null, chunkEncoding = "gzip-base64-json-chunked") {
   const current = await readCloudFile(config);
   const updatedAt = new Date().toISOString();
   const payload = {
     app: "AppStudios",
     updatedAt,
-    ...(chunks ? { encoding: "gzip-base64-json-chunked", chunks } : compressedData ? { encoding: "gzip-base64-json", compressedData } : { data }),
+    ...(chunks ? { encoding: chunkEncoding, chunks } : compressedData ? { encoding: "gzip-base64-json", compressedData } : { data }),
   };
   const url = githubContentUrl(config, config.path, "");
   const body = {
@@ -182,6 +182,7 @@ async function writeCloudChunk(config, body) {
 async function finalizeChunkUpload(config, body) {
   const uploadId = String(body.uploadId || "").replace(/[^a-zA-Z0-9._-]/g, "");
   const total = Number(body.total);
+  const chunkEncoding = body.encoding === "json-chunked" ? "json-chunked" : "gzip-base64-json-chunked";
   if (!uploadId || !Number.isInteger(total) || total <= 0) throw new Error("La copia por partes no es valida.");
   for (let index = 0; index < total; index += 1) {
     await readTextPath(config, getChunkPath(uploadId, index));
@@ -190,7 +191,7 @@ async function finalizeChunkUpload(config, body) {
     uploadId,
     total,
     pathPrefix: `${CHUNK_ROOT}/${uploadId}`,
-  });
+  }, chunkEncoding);
 }
 
 export default async function handler(req, res) {
