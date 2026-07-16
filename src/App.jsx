@@ -64,6 +64,7 @@ const priorities = ["baja", "media", "alta"];
 const resourceTypes = ["link", "pdf", "video", "libro", "otro"];
 const POMODORO_HISTORY_KEY = "appstudios-pomodoro-history-v1";
 const LOCAL_DATA_UPDATED_KEY = "appstudios-local-data-updated-at";
+const CLOUD_CHUNK_SIZE = 320000;
 const subjectSections = [
   { id: "teoria", label: "Teoría" },
   { id: "seminarios", label: "Seminarios" },
@@ -343,7 +344,7 @@ function App() {
     const timeout = window.setTimeout(() => controller.abort(), 45000);
     let response;
     try {
-      response = await fetch("/api/appstudios-sync", {
+      response = await fetch(options.path || "/api/appstudios-sync", {
       ...options,
       signal: controller.signal,
       headers: {
@@ -375,6 +376,23 @@ function App() {
     return payload;
   };
 
+  const readChunkedCloudData = async (manifest) => {
+    const total = Number(manifest?.chunks?.total || 0);
+    const uploadId = manifest?.chunks?.uploadId;
+    if (!uploadId || !total) throw new Error("La copia de nube esta incompleta. Sube los datos otra vez desde el dispositivo correcto.");
+    let compressedData = "";
+    for (let index = 0; index < total; index += 1) {
+      setSyncStatus(`Descargando parte ${index + 1}/${total}`);
+      const part = await syncRequest({
+        method: "GET",
+        path: `/api/appstudios-sync?uploadId=${encodeURIComponent(uploadId)}&chunk=${index}`,
+      });
+      if (typeof part.chunk !== "string") throw new Error(`No se ha podido leer la parte ${index + 1} de la nube.`);
+      compressedData += part.chunk;
+    }
+    return decompressCloudData(compressedData);
+  };
+
   const applyImportedData = (importedData, status = "Datos actualizados") => {
     if (!importedData?.subjects || !Array.isArray(importedData.subjects)) {
       throw new Error("La copia no parece ser de AppStudios.");
@@ -395,9 +413,25 @@ function App() {
       if (!compressedData) {
         throw new Error("Este navegador no puede comprimir una copia grande. Usa Copia/Importar o actualiza el navegador.");
       }
+      const total = Math.ceil(compressedData.length / CLOUD_CHUNK_SIZE);
+      const uploadId = `copy-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      for (let index = 0; index < total; index += 1) {
+        setSyncStatus(`Subiendo parte ${index + 1}/${total}`);
+        await syncRequest({
+          method: "POST",
+          body: JSON.stringify({
+            action: "upload-chunk",
+            uploadId,
+            index,
+            total,
+            chunk: compressedData.slice(index * CLOUD_CHUNK_SIZE, (index + 1) * CLOUD_CHUNK_SIZE),
+          }),
+        });
+      }
+      setSyncStatus("Finalizando copia");
       const result = await syncRequest({
         method: "POST",
-        body: JSON.stringify({ compressedData }),
+        body: JSON.stringify({ action: "finalize-chunks", uploadId, total }),
       });
       setCloudInfo(result);
       localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
@@ -415,13 +449,14 @@ function App() {
     setSyncStatus("Buscando copia");
     try {
       const result = await syncRequest();
-      if (!result?.data) throw new Error("No hay copia guardada en la nube manual.");
+      const downloadedData = result?.data || (result?.encoding === "gzip-base64-json-chunked" ? await readChunkedCloudData(result) : null);
+      if (!downloadedData) throw new Error("No hay copia guardada en la nube manual.");
       const when = result.updatedAt ? new Date(result.updatedAt).toLocaleString("es-ES") : "fecha desconocida";
       if (!window.confirm(`Esto sustituira los datos de este dispositivo por la copia de la nube (${when}). Continuar?`)) {
         setSyncStatus("Actualizacion cancelada");
         return;
       }
-      applyImportedData(result.data, "Datos actualizados desde nube");
+      applyImportedData(downloadedData, "Datos actualizados desde nube");
       setCloudInfo(result);
     } catch (error) {
       console.error(error);
@@ -2321,6 +2356,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     prepareEditorImages();
     refreshToc();
     ensureEditableParagraph(editorRef.current);
+    highlightCodeBlocks(editorRef.current);
   }, []);
 
   const saveDocument = () => {
@@ -2329,11 +2365,11 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     prepareEditorImages();
     refreshToc();
     ensureEditableParagraph(editorRef.current);
-    onChange(editorRef.current?.innerHTML || "");
+    onChange(serializeEditorHtml(editorRef.current));
   };
 
   const saveDocumentLight = () => {
-    onChange(editorRef.current?.innerHTML || "");
+    onChange(serializeEditorHtml(editorRef.current));
   };
 
   const refreshToc = () => {
@@ -2643,7 +2679,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
         navigator.clipboard?.writeText(codeContent?.innerText || "");
       }
       if (action === "edit" && codeContent) {
-        unhighlightCodeElement(codeContent);
+        highlightCodeElement(codeContent, { preserveSelection: false });
         codeContent.focus();
         const range = document.createRange();
         range.selectNodeContents(codeContent);
@@ -2719,15 +2755,13 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const handleEditorFocus = (event) => {
     const codeContent = event.target?.closest?.(".study-code-content");
     if (!codeContent || !editorRef.current?.contains(codeContent)) return;
-    unhighlightCodeElement(codeContent);
+    highlightCodeElement(codeContent, { preserveSelection: true });
   };
 
   const handleEditorBlur = (event) => {
     const codeContent = event.target?.closest?.(".study-code-content");
     if (!codeContent || !editorRef.current?.contains(codeContent)) return;
-    const rawCode = codeContent.innerText.replace(/\n$/, "");
-    codeContent.textContent = rawCode;
-    delete codeContent.dataset.rawCode;
+    highlightCodeElement(codeContent, { preserveSelection: false });
     saveDocumentLight();
   };
 
@@ -2803,7 +2837,8 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     selection.removeAllRanges();
     selection.addRange(range);
     savedRangeRef.current = range.cloneRange();
-    saveDocument();
+    highlightCodeElement(codeContent, { preserveSelection: true });
+    saveDocumentLight();
   };
 
   const deleteSectionFromToc = (headingId) => {
@@ -3217,7 +3252,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
           onInput={(event) => {
             const codeContent = event.target?.closest?.(".study-code-content");
             if (codeContent && editorRef.current?.contains(codeContent)) {
-              delete codeContent.dataset.rawCode;
+              highlightCodeElement(codeContent, { preserveSelection: true });
               saveSelection();
               saveDocumentLight();
               return;
@@ -5020,7 +5055,7 @@ function normalizeEditableBlocks(editor) {
         code.contentEditable = "true";
         code.spellcheck = false;
         if (code.dataset.rawCode || code.querySelector(".code-token-keyword, .code-token-function, .code-token-variable, .code-token-string, .code-token-number, .code-token-comment, .code-token-operator")) {
-          code.textContent = (code.dataset.rawCode || code.innerText || "").replace(/\n$/, "");
+          code.textContent = getCodePlainText(code);
           delete code.dataset.rawCode;
         }
       }
@@ -5039,26 +5074,81 @@ function normalizeEditableBlocks(editor) {
   });
 }
 
+function serializeEditorHtml(editor) {
+  if (!editor) return "";
+  const clone = editor.cloneNode(true);
+  clone.querySelectorAll(".study-code-content").forEach((code) => {
+    code.textContent = getCodePlainText(code);
+    delete code.dataset.rawCode;
+  });
+  return clone.innerHTML;
+}
+
 function highlightCodeBlocks(root) {
-  root.querySelectorAll(".study-code-content").forEach((code) => highlightCodeElement(code));
+  root.querySelectorAll(".study-code-content").forEach((code) => highlightCodeElement(code, { preserveSelection: false }));
 }
 
 function unhighlightCodeElement(codeElement) {
   if (!codeElement) return;
-  codeElement.textContent = (codeElement.dataset.rawCode || codeElement.innerText || "").replace(/\n$/, "");
+  codeElement.textContent = getCodePlainText(codeElement);
+  delete codeElement.dataset.rawCode;
 }
 
-function highlightCodeElement(codeElement) {
+function getCodePlainText(codeElement) {
+  if (!codeElement) return "";
+  return (codeElement.dataset.rawCode || codeElement.innerText || codeElement.textContent || "").replace(/\n$/, "");
+}
+
+function getCaretOffsetWithin(element) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !element.contains(selection.anchorNode)) return null;
+  const range = selection.getRangeAt(0);
+  const before = range.cloneRange();
+  before.selectNodeContents(element);
+  before.setEnd(range.endContainer, range.endOffset);
+  return before.toString().length;
+}
+
+function restoreCaretOffsetWithin(element, offset) {
+  if (!element || offset == null) return;
+  const selection = window.getSelection();
+  const range = document.createRange();
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let remaining = offset;
+  let node = walker.nextNode();
+  while (node) {
+    const length = node.textContent.length;
+    if (remaining <= length) {
+      range.setStart(node, remaining);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
+    remaining -= length;
+    node = walker.nextNode();
+  }
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function highlightCodeElement(codeElement, options = {}) {
   if (!codeElement) return;
   const block = codeElement.closest(".study-code-block");
   const language = block?.dataset.codeLanguage || "Texto plano";
-  const rawCode = (codeElement.dataset.rawCode || codeElement.innerText || "").replace(/\n$/, "");
-  codeElement.dataset.rawCode = rawCode;
+  const rawCode = getCodePlainText(codeElement);
+  const shouldRestoreCaret = options.preserveSelection && document.activeElement === codeElement;
+  const caretOffset = shouldRestoreCaret ? getCaretOffsetWithin(codeElement) : null;
   try {
     codeElement.innerHTML = highlightCodeSyntax(rawCode, language);
+    delete codeElement.dataset.rawCode;
+    if (shouldRestoreCaret) restoreCaretOffsetWithin(codeElement, caretOffset);
   } catch (error) {
     console.error(error);
     codeElement.textContent = rawCode;
+    if (shouldRestoreCaret) restoreCaretOffsetWithin(codeElement, caretOffset);
   }
 }
 
