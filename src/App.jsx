@@ -5239,6 +5239,9 @@ async function exportThemeVisualPdf(subject, theme, options = { includeToc: true
   sourceDocument.querySelectorAll(".selected-study-block, .selected-editor-image").forEach((node) => {
     node.classList.remove("selected-study-block", "selected-editor-image");
   });
+  sourceDocument.querySelectorAll(".selected-study-table, .dragging-editor-image").forEach((node) => {
+    node.classList.remove("selected-study-table", "dragging-editor-image");
+  });
   sourceDocument.querySelectorAll("[data-toc-delete]").forEach((node) => node.remove());
   sourceDocument.querySelectorAll(".study-code-actions").forEach((node) => node.remove());
   sourceDocument.querySelectorAll("[contenteditable]").forEach((node) => node.removeAttribute("contenteditable"));
@@ -5274,23 +5277,47 @@ async function buildContinuousPdfDocument(exportShell, sourceDocument, subject, 
 
   Array.from(sourceDocument.childNodes)
     .filter((node) => node.textContent?.trim() || node.nodeType === Node.ELEMENT_NODE)
-    .forEach((node) => {
-      const clone = node.cloneNode(true);
-      prepareNodeForPdfExport(clone);
-      fullDocument.appendChild(clone);
-    });
+    .forEach((node) => appendPdfSourceNode(fullDocument, node));
 
   await waitForExportNodeLayout(fullDocument);
-  fitLargePdfImages(fullDocument);
-  await waitForExportNodeLayout(fullDocument);
   return fullDocument;
+}
+
+function appendPdfSourceNode(target, node) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    if (!node.textContent?.trim()) return;
+    const paragraph = document.createElement("p");
+    paragraph.textContent = node.textContent;
+    prepareNodeForPdfExport(paragraph);
+    target.appendChild(paragraph);
+    return;
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+  if (shouldFlattenPdfContainer(node)) {
+    Array.from(node.childNodes).forEach((child) => appendPdfSourceNode(target, child));
+    return;
+  }
+  const clone = node.cloneNode(true);
+  prepareNodeForPdfExport(clone);
+  target.appendChild(clone);
+}
+
+function shouldFlattenPdfContainer(node) {
+  if (node.tagName !== "DIV" || node.classList.length > 0) return false;
+  const blockSelector = "div, p, h1, h2, h3, h4, section, ul, ol, blockquote, pre, figure, table, img";
+  const directBlockChildren = Array.from(node.children).filter((child) => child.matches(blockSelector));
+  if (!directBlockChildren.length) return false;
+  const hasStructuredContent = Boolean(
+    node.querySelector(".study-block, .study-code-block, .pdf-selection-note, table, figure, img"),
+  );
+  return hasStructuredContent || directBlockChildren.length > 1;
 }
 
 function createContinuousPdfDocument(subject, theme) {
   const documentNode = document.createElement("div");
   documentNode.className = "study-document pdf-export-document";
   documentNode.style.width = "1000px";
-  documentNode.style.minHeight = "1414px";
+  documentNode.style.minHeight = "0";
   documentNode.style.boxSizing = "border-box";
   documentNode.style.overflow = "visible";
   documentNode.style.margin = "0 auto";
@@ -5311,85 +5338,292 @@ function createContinuousPdfDocument(subject, theme) {
   return documentNode;
 }
 
-function fitLargePdfImages(documentNode) {
-  documentNode.querySelectorAll("img").forEach((image) => {
-    const height = image.getBoundingClientRect().height;
-    if (height > 930) {
-      image.style.maxHeight = "930px";
-      image.style.width = "auto";
-      image.style.marginLeft = "auto";
-      image.style.marginRight = "auto";
-    }
-  });
-}
-
 async function addDocumentBlocksToPdf(pdf, documentNode, pageWidth, pageHeight) {
   const margin = 14;
   const footerSpace = 11;
-  const gap = 5;
   const contentWidth = pageWidth - margin * 2;
   const contentHeight = pageHeight - margin * 2 - footerSpace;
+  const pageBottom = margin + contentHeight;
+  const documentRect = documentNode.getBoundingClientRect();
+  const documentStyle = window.getComputedStyle(documentNode);
+  const documentContentLeft = documentRect.left + readCssPixels(documentStyle.paddingLeft);
+  const documentContentWidth = Math.max(
+    1,
+    documentRect.width - readCssPixels(documentStyle.paddingLeft) - readCssPixels(documentStyle.paddingRight),
+  );
+  const cssToPdf = contentWidth / documentContentWidth;
   let y = margin;
   let pageIsEmpty = true;
+  let previousMarginBottom = 0;
   const blocks = Array.from(documentNode.children).filter((node) => !node.dataset.pdfSpacer);
+  let prefetched = null;
 
-  for (const block of blocks) {
-    const canvas = await html2canvas(block, {
-      backgroundColor: "#ffffff",
-      scale: 1.9,
-      useCORS: true,
-      logging: false,
-      windowWidth: 1120,
+  for (let index = 0; index < blocks.length; index += 1) {
+    const item = prefetched || await renderPdfBlock(blocks[index], {
+      contentWidth,
+      cssToPdf,
+      documentContentLeft,
+      documentContentWidth,
     });
-    if (!canvas.width || !canvas.height) continue;
-    const renderedHeight = canvas.height * (contentWidth / canvas.width);
+    prefetched = null;
+    if (!item) continue;
 
-    if (renderedHeight <= contentHeight) {
-      if (!pageIsEmpty && y + renderedHeight > margin + contentHeight) {
+    let gap = pageIsEmpty ? 0 : Math.max(previousMarginBottom, item.marginTop);
+    const renderedHeight = item.height;
+
+    if (item.isHeading && blocks[index + 1]) {
+      prefetched = await renderPdfBlock(blocks[index + 1], {
+        contentWidth,
+        cssToPdf,
+        documentContentLeft,
+        documentContentWidth,
+      });
+      if (prefetched) {
+        const nextGap = Math.max(item.marginBottom, prefetched.marginTop);
+        const nextVisibleHeight = prefetched.atomic && prefetched.height <= contentHeight
+          ? prefetched.height
+          : Math.min(prefetched.height, 28);
+        const keepTogetherHeight = gap + renderedHeight + nextGap + nextVisibleHeight;
+        if (!pageIsEmpty && y + keepTogetherHeight > pageBottom && keepTogetherHeight <= contentHeight) {
+          pdf.addPage();
+          y = margin;
+          pageIsEmpty = true;
+          gap = 0;
+        }
+      }
+    }
+
+    if (item.atomic && renderedHeight > contentHeight) {
+      if (!pageIsEmpty) {
         pdf.addPage();
         y = margin;
         pageIsEmpty = true;
       }
-      pdf.addImage(canvas.toDataURL("image/png", 1), "PNG", margin, y, contentWidth, renderedHeight);
-      y += renderedHeight + gap;
+      const scale = Math.min(contentWidth / item.width, contentHeight / item.height);
+      const fittedWidth = item.width * scale;
+      const fittedHeight = item.height * scale;
+      const x = margin + (contentWidth - fittedWidth) / 2;
+      addCanvasToPdf(pdf, item.canvas, x, y, fittedWidth, fittedHeight);
+      y += fittedHeight;
       pageIsEmpty = false;
+      previousMarginBottom = item.marginBottom;
       continue;
     }
 
-    if (!pageIsEmpty) {
+    if (renderedHeight <= contentHeight) {
+      if (!pageIsEmpty && y + gap + renderedHeight > pageBottom) {
+        pdf.addPage();
+        y = margin;
+        pageIsEmpty = true;
+        gap = 0;
+      }
+      y += gap;
+      addCanvasToPdf(pdf, item.canvas, item.x, y, item.width, renderedHeight);
+      y += renderedHeight;
+      pageIsEmpty = false;
+      previousMarginBottom = item.marginBottom;
+      continue;
+    }
+
+    if (!pageIsEmpty && pageBottom - y - gap < 35) {
       pdf.addPage();
       y = margin;
       pageIsEmpty = true;
+      gap = 0;
     }
-    y = addTallCanvasToPdf(pdf, canvas, margin, y, contentWidth, contentHeight, gap);
+    y += gap;
+    y = addFlowingCanvasToPdf(
+      pdf,
+      item.canvas,
+      item.x,
+      y,
+      item.width,
+      margin,
+      contentHeight,
+      pageBottom,
+      item.protectedRanges,
+    );
     pageIsEmpty = false;
+    previousMarginBottom = item.marginBottom;
   }
 }
 
-function addTallCanvasToPdf(pdf, canvas, margin, startY, contentWidth, contentHeight, gap) {
-  const pageCanvasHeight = Math.floor(canvas.width * (contentHeight / contentWidth));
-  const sliceCanvas = document.createElement("canvas");
-  const ctx = sliceCanvas.getContext("2d");
-  sliceCanvas.width = canvas.width;
-  sliceCanvas.height = pageCanvasHeight;
+async function renderPdfBlock(block, layout) {
+  const blockRect = block.getBoundingClientRect();
+  if (!blockRect.width || !blockRect.height) return null;
+  const style = window.getComputedStyle(block);
+  const canvas = await html2canvas(block, {
+    backgroundColor: "#ffffff",
+    scale: 1.9,
+    useCORS: true,
+    logging: false,
+    windowWidth: 1120,
+    scrollX: 0,
+    scrollY: 0,
+  });
+  if (!canvas.width || !canvas.height) return null;
 
+  const width = Math.min(
+    layout.contentWidth,
+    Math.max(1, blockRect.width * layout.cssToPdf),
+  );
+  const height = canvas.height * (width / canvas.width);
+  const canvasScaleY = canvas.height / blockRect.height;
+  const relativeLeft = Math.max(0, blockRect.left - layout.documentContentLeft);
+  const x = 14 + Math.min(
+    Math.max(0, relativeLeft * layout.cssToPdf),
+    Math.max(0, layout.contentWidth - width),
+  );
+
+  return {
+    block,
+    canvas,
+    x,
+    width,
+    height,
+    marginTop: Math.min(12, Math.max(0, readCssPixels(style.marginTop) * layout.cssToPdf)),
+    marginBottom: Math.min(12, Math.max(0, readCssPixels(style.marginBottom) * layout.cssToPdf)),
+    atomic: isAtomicPdfBlock(block),
+    isHeading: /^H[1-4]$/.test(block.tagName),
+    protectedRanges: getProtectedCanvasRanges(block, blockRect, canvasScaleY),
+  };
+}
+
+function addFlowingCanvasToPdf(pdf, canvas, x, startY, renderedWidth, margin, contentHeight, pageBottom, protectedRanges = []) {
+  const scale = renderedWidth / canvas.width;
+  const fullPageSourceHeight = Math.max(1, Math.floor(contentHeight / scale));
   let sourceY = 0;
   let firstSlice = true;
-  let finalY = margin;
+  let finalY = startY;
   while (sourceY < canvas.height) {
-    if (!firstSlice) pdf.addPage();
+    if (!firstSlice) {
+      pdf.addPage();
+      finalY = margin;
+    }
+    const availablePdfHeight = firstSlice ? Math.max(1, pageBottom - finalY) : contentHeight;
+    const maxSourceHeight = Math.max(1, Math.floor(availablePdfHeight / scale));
+    const sourceEnd = findSafeCanvasBreak(
+      canvas,
+      sourceY,
+      maxSourceHeight,
+      protectedRanges,
+      fullPageSourceHeight,
+    );
+    const sliceHeight = Math.max(1, sourceEnd - sourceY);
+    const sliceCanvas = document.createElement("canvas");
+    sliceCanvas.width = canvas.width;
+    sliceCanvas.height = sliceHeight;
+    const ctx = sliceCanvas.getContext("2d");
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
-    const sliceHeight = Math.min(pageCanvasHeight, canvas.height - sourceY);
     ctx.drawImage(canvas, 0, sourceY, canvas.width, sliceHeight, 0, 0, sliceCanvas.width, sliceHeight);
-    const pdfSliceHeight = sliceHeight * (contentWidth / canvas.width);
-    const sliceY = firstSlice ? startY : margin;
-    pdf.addImage(sliceCanvas.toDataURL("image/png", 1), "PNG", margin, sliceY, contentWidth, pdfSliceHeight);
-    finalY = sliceY + pdfSliceHeight + gap;
-    sourceY += sliceHeight;
+    const pdfSliceHeight = sliceHeight * scale;
+    addCanvasToPdf(pdf, sliceCanvas, x, finalY, renderedWidth, pdfSliceHeight);
+    finalY += pdfSliceHeight;
+    sourceY = sourceEnd;
     firstSlice = false;
   }
   return finalY;
+}
+
+function findSafeCanvasBreak(canvas, sourceY, maxSourceHeight, protectedRanges = [], fullPageSourceHeight = maxSourceHeight) {
+  const hardEnd = Math.min(canvas.height, sourceY + maxSourceHeight);
+  if (hardEnd >= canvas.height) return canvas.height;
+
+  const keepTogetherRanges = protectedRanges.filter((range) => range.end - range.start <= fullPageSourceHeight);
+  const searchStart = Math.max(sourceY + Math.floor(maxSourceHeight * 0.58), sourceY + 1);
+  const blockingRange = keepTogetherRanges.find((range) => range.start < hardEnd && range.end > hardEnd);
+  if (blockingRange) {
+    const beforeProtectedBlock = Math.max(sourceY + 1, Math.floor(blockingRange.start) - 3);
+    const protectedHeight = blockingRange.end - blockingRange.start;
+    if (protectedHeight <= fullPageSourceHeight && beforeProtectedBlock > sourceY + 8) {
+      return beforeProtectedBlock;
+    }
+    if (beforeProtectedBlock >= searchStart) return beforeProtectedBlock;
+  }
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  let blankRun = 0;
+  for (let y = hardEnd - 1; y >= searchStart; y -= 1) {
+    if (isInsideProtectedRange(y, keepTogetherRanges)) {
+      blankRun = 0;
+      continue;
+    }
+    if (isCanvasRowBlank(ctx, canvas.width, y)) {
+      blankRun += 1;
+      if (blankRun >= 4) return Math.min(hardEnd, y + 3);
+    } else {
+      blankRun = 0;
+    }
+  }
+  return hardEnd;
+}
+
+function isCanvasRowBlank(ctx, width, y) {
+  const pixels = ctx.getImageData(0, y, width, 1).data;
+  let colored = 0;
+  let samples = 0;
+  let transitions = 0;
+  let previousColor = "";
+  for (let x = 0; x < width; x += 4) {
+    const offset = x * 4;
+    samples += 1;
+    const red = pixels[offset];
+    const green = pixels[offset + 1];
+    const blue = pixels[offset + 2];
+    const color = `${red >> 4}-${green >> 4}-${blue >> 4}`;
+    if (previousColor && color !== previousColor) transitions += 1;
+    previousColor = color;
+    if (pixels[offset + 3] > 8 && (pixels[offset] < 247 || pixels[offset + 1] < 247 || pixels[offset + 2] < 247)) {
+      colored += 1;
+    }
+  }
+  const almostWhite = colored <= Math.max(2, samples * 0.015);
+  const visuallyUniform = transitions <= 32;
+  return almostWhite || visuallyUniform;
+}
+
+function addCanvasToPdf(pdf, canvas, x, y, width, height) {
+  pdf.addImage(canvas.toDataURL("image/png", 1), "PNG", x, y, width, height, undefined, "FAST");
+}
+
+function isAtomicPdfBlock(block) {
+  const selector = ".auto-toc, .study-block, .study-code-block, .pdf-selection-note, blockquote, table, figure, img";
+  if (block.matches(selector)) return true;
+  const meaningfulChildren = Array.from(block.childNodes).filter((node) => {
+    if (node.nodeType === Node.TEXT_NODE) return Boolean(node.textContent.trim());
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    return node.tagName !== "BR" || Boolean(node.nextSibling);
+  });
+  return meaningfulChildren.length === 1
+    && meaningfulChildren[0].nodeType === Node.ELEMENT_NODE
+    && meaningfulChildren[0].matches(selector);
+}
+
+function getProtectedCanvasRanges(block, blockRect, canvasScaleY) {
+  const selector = ".auto-toc, .study-block, .study-code-block, .pdf-selection-note, blockquote, table, figure, img";
+  const protectedNodes = Array.from(block.querySelectorAll(selector)).filter((node) => {
+    const parentProtected = node.parentElement?.closest(selector);
+    return !parentProtected || !block.contains(parentProtected);
+  });
+  return protectedNodes
+    .map((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        start: Math.max(0, (rect.top - blockRect.top) * canvasScaleY),
+        end: Math.min(blockRect.height * canvasScaleY, (rect.bottom - blockRect.top) * canvasScaleY),
+      };
+    })
+    .filter((range) => range.end > range.start);
+}
+
+function isInsideProtectedRange(y, ranges) {
+  return ranges.some((range) => y > range.start && y < range.end);
+}
+
+function readCssPixels(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function prepareNodeForPdfExport(node) {
@@ -5403,11 +5637,29 @@ function prepareNodeForPdfExport(node) {
     child.style.breakInside = "avoid";
     child.style.pageBreakInside = "avoid";
   });
+  element.querySelectorAll?.(".study-code-content").forEach((code) => {
+    code.style.overflow = "visible";
+    code.style.whiteSpace = "pre-wrap";
+    code.style.overflowWrap = "break-word";
+  });
+  if (element.matches(".study-code-block")) element.style.width = "100%";
+  element.querySelectorAll?.(".study-code-block").forEach((codeBlock) => {
+    codeBlock.style.width = "100%";
+  });
+  element.querySelectorAll?.(".study-table").forEach((table) => {
+    table.style.width = "100%";
+    table.style.tableLayout = "fixed";
+    table.querySelectorAll("th, td").forEach((cell) => {
+      cell.style.minWidth = "0";
+      cell.style.overflowWrap = "anywhere";
+    });
+  });
 }
 
 function preparePdfImage(image) {
   image.style.display = "block";
   image.style.maxWidth = "100%";
+  image.style.maxHeight = "1200px";
   image.style.height = "auto";
   image.style.objectFit = "contain";
   image.style.breakInside = "avoid";
@@ -5415,6 +5667,7 @@ function preparePdfImage(image) {
 }
 
 async function waitForExportNodeLayout(node) {
+  if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
   const images = node.nodeType === Node.ELEMENT_NODE ? Array.from(node.matches("img") ? [node] : node.querySelectorAll("img")) : [];
   await Promise.all(
     images.map((image) => {

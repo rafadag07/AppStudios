@@ -607,3 +607,37 @@ select {
 .study-document .study-table td:last-child {
   border-right: 0;
 }
+
+.pdf-export-document,
+.pdf-export-document * {
+  animation: none !important;
+  transition: none !important;
+}
+
+.pdf-export-document .study-block,
+.pdf-export-document .study-code-block,
+.pdf-export-document .pdf-selection-note,
+.pdf-export-document .auto-toc,
+.pdf-export-document blockquote,
+.pdf-export-document figure,
+.pdf-export-document table,
+.pdf-export-document img {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.pdf-export-document .study-code-content {
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.pdf-export-document .study-table {
+  table-layout: fixed;
+}
+
+.pdf-export-document .study-table th,
+.pdf-export-document .study-table td {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
