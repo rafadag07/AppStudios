@@ -55,6 +55,7 @@ import {
 } from "lucide-react";
 import { STORAGE_KEY, createId, initialData } from "./data/schema";
 import { getStoredFile, saveStoredFile } from "./data/fileStore";
+import { readAppData, writeAppData } from "./data/appStorage";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -139,7 +140,7 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 function readStoredData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : initialData;
+    const parsed = raw ? JSON.parse(raw) : structuredClone(initialData);
     migrateSubjectQuestions(parsed);
     if (!parsed.__eventsClearedV2) {
       parsed.events = [];
@@ -147,7 +148,7 @@ function readStoredData() {
     }
     return parsed;
   } catch {
-    const fallback = { ...initialData, events: [], __eventsClearedV2: true };
+    const fallback = { ...structuredClone(initialData), events: [], __eventsClearedV2: true };
     migrateSubjectQuestions(fallback);
     return fallback;
   }
@@ -192,7 +193,11 @@ function useGlobalPomodoro(data) {
   }, [data.subjects, selectedSubjectId]);
 
   useEffect(() => {
-    localStorage.setItem(POMODORO_HISTORY_KEY, JSON.stringify(history));
+    try {
+      localStorage.setItem(POMODORO_HISTORY_KEY, JSON.stringify(history));
+    } catch (error) {
+      console.warn("No se ha podido guardar el historial de Pomodoro", error);
+    }
   }, [history]);
 
   const notifyPomodoro = (title, body) => {
@@ -328,6 +333,8 @@ function useGlobalPomodoro(data) {
 
 function App() {
   const [data, setData] = useState(readStoredData);
+  const [storageReady, setStorageReady] = useState(false);
+  const [localSaveStatus, setLocalSaveStatus] = useState("Cargando datos guardados");
   const [view, setView] = useState({ page: "dashboard" });
   const [modal, setModal] = useState(null);
   const [query, setQuery] = useState("");
@@ -335,8 +342,6 @@ function App() {
   const [syncStatus, setSyncStatus] = useState("Nube manual");
   const [syncBusy, setSyncBusy] = useState(false);
   const latestDataRef = useRef(data);
-  const hadStoredDataRef = useRef(Boolean(localStorage.getItem(STORAGE_KEY)));
-  const initialLocalWriteRef = useRef(true);
   const pomodoro = useGlobalPomodoro(data);
 
   const syncRequest = async (options = {}) => {
@@ -402,7 +407,6 @@ function App() {
     }
     migrateSubjectQuestions(importedData);
     setData(importedData);
-    hadStoredDataRef.current = true;
     localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
     setSyncStatus(status);
   };
@@ -511,26 +515,74 @@ function App() {
   }, [data]);
 
   useEffect(() => {
+    let active = true;
+
+    const hydrateLocalData = async () => {
+      try {
+        const storedRecord = await readAppData();
+        const nextData = storedRecord?.data || latestDataRef.current;
+        migrateSubjectQuestions(nextData);
+        if (!nextData.__eventsClearedV2) {
+          nextData.events = [];
+          nextData.__eventsClearedV2 = true;
+        }
+
+        if (!storedRecord?.data) await writeAppData(nextData);
+        if (!active) return;
+
+        latestDataRef.current = nextData;
+        setData(nextData);
+        setStorageReady(true);
+        setLocalSaveStatus("Guardado en este dispositivo");
+
+        // The full legacy JSON is removed only after IndexedDB has a valid copy.
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.setItem(LOCAL_DATA_UPDATED_KEY, storedRecord?.updatedAt || new Date().toISOString());
+        navigator.storage?.persist?.().catch(() => undefined);
+      } catch (error) {
+        console.error("No se ha podido iniciar IndexedDB", error);
+        if (!active) return;
+        setStorageReady(true);
+        setLocalSaveStatus("Guardado local limitado: descarga una copia");
+      }
+    };
+
+    hydrateLocalData();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     refreshManualCloudInfo();
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-      if (initialLocalWriteRef.current) {
-        initialLocalWriteRef.current = false;
-        if (hadStoredDataRef.current && !localStorage.getItem(LOCAL_DATA_UPDATED_KEY)) {
-          localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
-        }
-      } else {
-        hadStoredDataRef.current = true;
+    if (!storageReady) return undefined;
+    setLocalSaveStatus("Guardando en este dispositivo...");
+    const timer = window.setTimeout(async () => {
+      try {
+        await writeAppData(data);
+        localStorage.removeItem(STORAGE_KEY);
         localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
+        setLocalSaveStatus("Guardado en este dispositivo");
+      } catch (error) {
+        console.error(error);
+        setLocalSaveStatus("No se ha podido guardar: descarga una copia");
       }
-    } catch (error) {
-      console.error(error);
-      setSyncStatus("No se ha podido guardar en este navegador. Exporta una copia para no perder datos.");
-    }
-  }, [data]);
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [data, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady) return undefined;
+    const saveWhenHidden = () => {
+      if (document.visibilityState !== "hidden") return;
+      writeAppData(latestDataRef.current).catch((error) => console.error("Guardado al salir interrumpido", error));
+    };
+    document.addEventListener("visibilitychange", saveWhenHidden);
+    return () => document.removeEventListener("visibilitychange", saveWhenHidden);
+  }, [storageReady]);
 
   const allThemes = useMemo(
     () => data.subjects.flatMap((subject) => subject.themes.map((theme) => ({ ...theme, subject }))),
@@ -543,6 +595,18 @@ function App() {
     const completedThemes = allThemes.filter((theme) => normalizeStudyState(theme.status) === "estudiado").length;
     return { pendingTasks, totalThemes, completedThemes };
   }, [allThemes, data.subjects, data.tasks]);
+
+  if (!storageReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f7f4ee] px-6 text-slate-900 campus-grid">
+        <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-8 text-center shadow-xl">
+          <Save className="mx-auto h-9 w-9 text-emerald-700" />
+          <h1 className="mt-4 text-2xl font-black">Protegiendo tus apuntes</h1>
+          <p className="mt-2 text-sm font-semibold text-slate-500">Cargando la ultima copia guardada en este dispositivo...</p>
+        </div>
+      </div>
+    );
+  }
 
   const updateData = (recipe) => setData((current) => recipe(structuredClone(current)));
 
@@ -591,7 +655,7 @@ function App() {
           <SubjectQAPage subject={currentSubject} openModal={setModal} updateData={updateData} setView={setView} />
         )}
         {view.page === "theme" && currentSubject && currentTheme && (
-          <ThemePage subject={currentSubject} theme={currentTheme} openModal={setModal} updateData={updateData} setView={setView} syncStatus={syncStatus} />
+          <ThemePage subject={currentSubject} theme={currentTheme} openModal={setModal} updateData={updateData} setView={setView} saveStatus={localSaveStatus} />
         )}
         {view.page === "pdf" && currentSubject && currentTheme && currentMedia && (
           <PdfViewerPage
@@ -1478,7 +1542,7 @@ function SubjectPage({ subject, setView, openModal, updateData }) {
   );
 }
 
-function ThemePage({ subject, theme, openModal, updateData, setView, syncStatus }) {
+function ThemePage({ subject, theme, openModal, updateData, setView, saveStatus }) {
   const fileInputRef = useRef(null);
   const [savedAt, setSavedAt] = useState(null);
   const [previewFile, setPreviewFile] = useState(null);
@@ -1614,7 +1678,7 @@ function ThemePage({ subject, theme, openModal, updateData, setView, syncStatus 
           </ThemeSection>
           <section className="rounded-lg border border-slate-900/10 bg-white p-4">
             <h2 className="flex items-center gap-2 font-black"><Save size={18} /> Guardado</h2>
-            <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-500">{syncStatus}</p>
+            <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-500">{saveStatus}</p>
             <p className="mt-2 text-sm text-slate-600">El documento se guarda automáticamente en este navegador mientras escribes.</p>
           </section>
         </aside>
