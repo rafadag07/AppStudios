@@ -64,6 +64,7 @@ const statuses = ["nada", "medio", "estudiado"];
 const priorities = ["baja", "media", "alta"];
 const resourceTypes = ["link", "pdf", "video", "libro", "otro"];
 const POMODORO_HISTORY_KEY = "appstudios-pomodoro-history-v1";
+const POMODORO_JULY_ADJUSTMENT_KEY = "appstudios-pomodoro-july-2026-adjustment-v1";
 const LOCAL_DATA_UPDATED_KEY = "appstudios-local-data-updated-at";
 const CLOUD_CHUNK_SIZE = 320000;
 const subjectSections = [
@@ -180,7 +181,35 @@ function useGlobalPomodoro(data) {
   const [completionPrompt, setCompletionPrompt] = useState(null);
   const [history, setHistory] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem(POMODORO_HISTORY_KEY) || "[]");
+      const storedHistory = JSON.parse(localStorage.getItem(POMODORO_HISTORY_KEY) || "[]");
+      if (localStorage.getItem(POMODORO_JULY_ADJUSTMENT_KEY)) return storedHistory;
+
+      const requestedSessions = [
+        {
+          id: "pomodoro-manual-2026-07-17-20",
+          mode: "study",
+          modeLabel: "Estudio",
+          subjectId: null,
+          subjectName: "Estudio general",
+          duration: 20,
+          notes: "Sesion de estudio añadida manualmente.",
+          createdAt: "2026-07-17T10:00:00.000+02:00",
+        },
+        {
+          id: "pomodoro-manual-2026-07-06-50",
+          mode: "study",
+          modeLabel: "Estudio",
+          subjectId: null,
+          subjectName: "Estudio general",
+          duration: 50,
+          notes: "Sesion de estudio añadida manualmente.",
+          createdAt: "2026-07-06T18:00:00.000+02:00",
+        },
+      ];
+      const existingIds = new Set(storedHistory.map((session) => session.id));
+      return [...requestedSessions.filter((session) => !existingIds.has(session.id)), ...storedHistory].sort(
+        (first, second) => new Date(second.createdAt) - new Date(first.createdAt)
+      );
     } catch {
       return [];
     }
@@ -193,11 +222,17 @@ function useGlobalPomodoro(data) {
   }, [data.subjects, selectedSubjectId]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(POMODORO_HISTORY_KEY, JSON.stringify(history));
-    } catch (error) {
-      console.warn("No se ha podido guardar el historial de Pomodoro", error);
-    }
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(POMODORO_HISTORY_KEY, JSON.stringify(history));
+        if (history.some((session) => session.id === "pomodoro-manual-2026-07-17-20")) {
+          localStorage.setItem(POMODORO_JULY_ADJUSTMENT_KEY, "done");
+        }
+      } catch (error) {
+        console.warn("No se ha podido guardar el historial de Pomodoro", error);
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
   }, [history]);
 
   const notifyPomodoro = (title, body) => {
@@ -2431,6 +2466,7 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
     prepareEditorImages();
     refreshToc();
     ensureEditableParagraph(editorRef.current);
+    highlightCodeBlocks(editorRef.current);
     onChange(serializeEditorHtml(editorRef.current));
   };
 
@@ -5139,7 +5175,7 @@ function normalizeEditableBlocks(editor) {
       if (code) {
         code.contentEditable = "true";
         code.spellcheck = false;
-        if (code.dataset.rawCode || code.querySelector(".code-token-keyword, .code-token-function, .code-token-variable, .code-token-string, .code-token-number, .code-token-comment, .code-token-operator")) {
+        if (code.dataset.rawCode) {
           code.textContent = getCodePlainText(code);
           delete code.dataset.rawCode;
         }
@@ -5162,10 +5198,6 @@ function normalizeEditableBlocks(editor) {
 function serializeEditorHtml(editor) {
   if (!editor) return "";
   const clone = editor.cloneNode(true);
-  clone.querySelectorAll(".study-code-content").forEach((code) => {
-    code.textContent = getCodePlainText(code);
-    delete code.dataset.rawCode;
-  });
   return clone.innerHTML;
 }
 
