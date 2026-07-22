@@ -65,8 +65,63 @@ const priorities = ["baja", "media", "alta"];
 const resourceTypes = ["link", "pdf", "video", "libro", "otro"];
 const POMODORO_HISTORY_KEY = "appstudios-pomodoro-history-v1";
 const POMODORO_JULY_ADJUSTMENT_KEY = "appstudios-pomodoro-july-2026-adjustment-v1";
+const POMODORO_JULY_22_ADJUSTMENT_KEY = "appstudios-pomodoro-july-22-2026-adjustment-v1";
+const POMODORO_SETTINGS_KEY = "appstudios-pomodoro-settings-v1";
 const LOCAL_DATA_UPDATED_KEY = "appstudios-local-data-updated-at";
 const CLOUD_CHUNK_SIZE = 320000;
+const JULY_22_POMODORO_SESSIONS = [
+  {
+    id: "pomodoro-manual-2026-07-22-study-1",
+    mode: "study",
+    modeLabel: "Estudio",
+    subjectId: null,
+    subjectName: "Estudio general",
+    duration: 20,
+    notes: "Sesion importada del otro dispositivo.",
+    createdAt: "2026-07-22T09:00:00.000+02:00",
+  },
+  {
+    id: "pomodoro-manual-2026-07-22-short-break",
+    mode: "short",
+    modeLabel: "Descanso corto",
+    subjectId: null,
+    subjectName: "Estudio general",
+    duration: 5,
+    notes: "Sesion importada del otro dispositivo.",
+    createdAt: "2026-07-22T09:20:00.000+02:00",
+  },
+  {
+    id: "pomodoro-manual-2026-07-22-study-2",
+    mode: "study",
+    modeLabel: "Estudio",
+    subjectId: null,
+    subjectName: "Estudio general",
+    duration: 20,
+    notes: "Sesion importada del otro dispositivo.",
+    createdAt: "2026-07-22T09:25:00.000+02:00",
+  },
+  {
+    id: "pomodoro-manual-2026-07-22-long-break",
+    mode: "long",
+    modeLabel: "Descanso largo",
+    subjectId: null,
+    subjectName: "Estudio general",
+    duration: 9,
+    notes: "Sesion importada del otro dispositivo.",
+    createdAt: "2026-07-22T09:45:00.000+02:00",
+  },
+];
+
+function hasJuly22PomodoroSummary(history) {
+  const july22Sessions = history.filter((session) => String(session?.createdAt || "").startsWith("2026-07-22"));
+  const studyMinutes = july22Sessions
+    .filter((session) => session.mode === "study")
+    .reduce((total, session) => total + (Number(session.duration) || 0), 0);
+  const breakMinutes = july22Sessions
+    .filter((session) => session.mode === "short" || session.mode === "long")
+    .reduce((total, session) => total + (Number(session.duration) || 0), 0);
+  return july22Sessions.length >= 4 && studyMinutes >= 40 && breakMinutes >= 14;
+}
 const subjectSections = [
   { id: "teoria", label: "Teoría" },
   { id: "seminarios", label: "Seminarios" },
@@ -172,19 +227,36 @@ function migrateSubjectQuestions(data) {
 }
 
 function useGlobalPomodoro(data) {
-  const [selectedSubjectId, setSelectedSubjectId] = useState(data.subjects[0]?.id || "");
+  const storedPomodoroSettings = (() => {
+    try {
+      return JSON.parse(localStorage.getItem(POMODORO_SETTINGS_KEY) || "{}");
+    } catch {
+      return {};
+    }
+  })();
+  const [selectedSubjectId, setSelectedSubjectId] = useState(
+    storedPomodoroSettings.selectedSubjectId || data.subjects[0]?.id || ""
+  );
   const [mode, setMode] = useState("study");
-  const [durations, setDurations] = useState({ study: 25, short: 5, long: 15 });
-  const [seconds, setSeconds] = useState(25 * 60);
+  const [durations, setDurations] = useState(() => {
+    const saved = storedPomodoroSettings.durations || {};
+    return {
+      study: Math.max(1, Math.min(90, Number(saved.study) || 25)),
+      short: Math.max(1, Math.min(90, Number(saved.short) || 5)),
+      long: Math.max(1, Math.min(90, Number(saved.long) || 15)),
+    };
+  });
+  const [seconds, setSeconds] = useState(() => {
+    const savedStudy = Number(storedPomodoroSettings.durations?.study) || 25;
+    return Math.max(1, Math.min(90, savedStudy)) * 60;
+  });
   const [running, setRunning] = useState(false);
   const [notes, setNotes] = useState("");
   const [completionPrompt, setCompletionPrompt] = useState(null);
   const [history, setHistory] = useState(() => {
     try {
       const storedHistory = JSON.parse(localStorage.getItem(POMODORO_HISTORY_KEY) || "[]");
-      if (localStorage.getItem(POMODORO_JULY_ADJUSTMENT_KEY)) return storedHistory;
-
-      const requestedSessions = [
+      const requestedSessions = localStorage.getItem(POMODORO_JULY_ADJUSTMENT_KEY) ? [] : [
         {
           id: "pomodoro-manual-2026-07-17-20",
           mode: "study",
@@ -206,6 +278,9 @@ function useGlobalPomodoro(data) {
           createdAt: "2026-07-06T18:00:00.000+02:00",
         },
       ];
+      if (!localStorage.getItem(POMODORO_JULY_22_ADJUSTMENT_KEY) && !hasJuly22PomodoroSummary(storedHistory)) {
+        requestedSessions.push(...JULY_22_POMODORO_SESSIONS);
+      }
       const existingIds = new Set(storedHistory.map((session) => session.id));
       return [...requestedSessions.filter((session) => !existingIds.has(session.id)), ...storedHistory].sort(
         (first, second) => new Date(second.createdAt) - new Date(first.createdAt)
@@ -228,12 +303,23 @@ function useGlobalPomodoro(data) {
         if (history.some((session) => session.id === "pomodoro-manual-2026-07-17-20")) {
           localStorage.setItem(POMODORO_JULY_ADJUSTMENT_KEY, "done");
         }
+        if (hasJuly22PomodoroSummary(history)) {
+          localStorage.setItem(POMODORO_JULY_22_ADJUSTMENT_KEY, "done");
+        }
       } catch (error) {
         console.warn("No se ha podido guardar el historial de Pomodoro", error);
       }
     }, 900);
     return () => window.clearTimeout(timer);
   }, [history]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(POMODORO_SETTINGS_KEY, JSON.stringify({ durations, selectedSubjectId }));
+    } catch (error) {
+      console.warn("No se ha podido guardar la configuracion de Pomodoro", error);
+    }
+  }, [durations, selectedSubjectId]);
 
   const notifyPomodoro = (title, body) => {
     if (!("Notification" in window)) return;
@@ -317,6 +403,42 @@ function useGlobalPomodoro(data) {
     setHistory([]);
   };
 
+  const getSyncSnapshot = () => ({
+    version: 1,
+    history,
+    durations,
+    selectedSubjectId,
+  });
+
+  const importSyncSnapshot = (snapshot) => {
+    if (!snapshot || typeof snapshot !== "object") return;
+    if (Array.isArray(snapshot.history)) {
+      const cleanHistory = snapshot.history
+        .filter((session) => session && session.id && session.createdAt)
+        .map((session) => ({
+          ...session,
+          duration: Math.max(1, Number(session.duration) || 1),
+        }))
+        .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
+      setHistory(cleanHistory);
+    }
+    if (snapshot.durations && typeof snapshot.durations === "object") {
+      const nextDurations = {
+        study: Math.max(1, Math.min(90, Number(snapshot.durations.study) || 25)),
+        short: Math.max(1, Math.min(90, Number(snapshot.durations.short) || 5)),
+        long: Math.max(1, Math.min(90, Number(snapshot.durations.long) || 15)),
+      };
+      setDurations(nextDurations);
+      setMode("study");
+      setSeconds(nextDurations.study * 60);
+      setRunning(false);
+      setCompletionPrompt(null);
+    }
+    if (typeof snapshot.selectedSubjectId === "string") {
+      setSelectedSubjectId(snapshot.selectedSubjectId);
+    }
+  };
+
   useEffect(() => {
     if (!running) return undefined;
     const timer = window.setInterval(() => {
@@ -363,6 +485,8 @@ function useGlobalPomodoro(data) {
     resetDurations,
     deleteSession,
     clearHistory,
+    getSyncSnapshot,
+    importSyncSnapshot,
   };
 }
 
@@ -436,14 +560,29 @@ function App() {
     return JSON.parse(chunkedText);
   };
 
-  const applyImportedData = (importedData, status = "Datos actualizados") => {
+  const createDeviceBackup = () => ({
+    app: "AppStudios",
+    format: "appstudios-device-backup-v2",
+    exportedAt: new Date().toISOString(),
+    data: latestDataRef.current,
+    pomodoro: pomodoro.getSyncSnapshot(),
+  });
+
+  const applyImportedData = (importedPayload, status = "Datos actualizados") => {
+    const importedData = importedPayload?.data?.subjects
+      ? importedPayload.data
+      : importedPayload?.appData?.subjects
+        ? importedPayload.appData
+        : importedPayload;
+    const importedPomodoro = importedPayload?.pomodoro || importedPayload?.pomodoroData || null;
     if (!importedData?.subjects || !Array.isArray(importedData.subjects)) {
       throw new Error("La copia no parece ser de AppStudios.");
     }
     migrateSubjectQuestions(importedData);
     setData(importedData);
+    if (importedPomodoro) pomodoro.importSyncSnapshot(importedPomodoro);
     localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
-    setSyncStatus(status);
+    setSyncStatus(importedPomodoro ? `${status} (incluye Pomodoro)` : status);
   };
 
   const uploadManualCloud = async () => {
@@ -452,7 +591,7 @@ function App() {
     setSyncStatus("Preparando copia");
     try {
       await new Promise((resolve) => window.requestAnimationFrame(resolve));
-      const cloudData = JSON.stringify(latestDataRef.current);
+      const cloudData = JSON.stringify(createDeviceBackup());
       const total = Math.ceil(cloudData.length / CLOUD_CHUNK_SIZE);
       const uploadId = `copy-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       for (let index = 0; index < total; index += 1) {
@@ -519,11 +658,7 @@ function App() {
   };
 
   const exportLocalBackup = () => {
-    const payload = {
-      app: "AppStudios",
-      exportedAt: new Date().toISOString(),
-      data: latestDataRef.current,
-    };
+    const payload = createDeviceBackup();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -540,9 +675,8 @@ function App() {
     if (!file) return;
     const text = await file.text();
     const payload = JSON.parse(text);
-    const importedData = payload?.data || payload;
     if (!window.confirm("Esto sustituira los datos de este dispositivo por la copia importada. Continuar?")) return;
-    applyImportedData(importedData, "Copia importada");
+    applyImportedData(payload, "Copia importada");
   };
 
   useEffect(() => {
@@ -973,7 +1107,7 @@ function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadClo
             </div>
             <input ref={importInputRef} type="file" accept="application/json,.json" className="hidden" onChange={importBackup} />
             <p className="rounded-lg bg-yellow-50 p-3 text-xs font-bold text-yellow-800">
-              Puedes subir desde cualquier dispositivo. Hazlo solo cuando ese dispositivo tenga la version buena.
+              Incluye asignaturas, apuntes, archivos, historial y tiempos de Pomodoro. Sube solo desde el dispositivo que tenga la version buena.
             </p>
             {error && <p className="text-sm font-bold text-red-600">{error}</p>}
           </div>
@@ -5533,7 +5667,7 @@ async function addDocumentBlocksToPdf(pdf, documentNode, pageWidth, pageHeight) 
       }
     }
 
-    if (item.atomic && renderedHeight > contentHeight) {
+    if (item.atomic && renderedHeight > contentHeight && shouldFitOversizedPdfBlock(item.block)) {
       if (!pageIsEmpty) {
         pdf.addPage();
         y = margin;
@@ -5565,7 +5699,9 @@ async function addDocumentBlocksToPdf(pdf, documentNode, pageWidth, pageHeight) 
       continue;
     }
 
-    if (!pageIsEmpty && pageBottom - y - gap < 35) {
+    const remainingHeight = pageBottom - y - gap;
+    const minimumSliceHeight = item.minimumSliceHeight || 35;
+    if (!pageIsEmpty && remainingHeight < Math.min(contentHeight * 0.35, minimumSliceHeight)) {
       pdf.addPage();
       y = margin;
       pageIsEmpty = true;
@@ -5582,6 +5718,7 @@ async function addDocumentBlocksToPdf(pdf, documentNode, pageWidth, pageHeight) 
       contentHeight,
       pageBottom,
       item.protectedRanges,
+      item.preferredBreaks,
     );
     pageIsEmpty = false;
     previousMarginBottom = item.marginBottom;
@@ -5626,10 +5763,23 @@ async function renderPdfBlock(block, layout) {
     atomic: isAtomicPdfBlock(block),
     isHeading: /^H[1-4]$/.test(block.tagName),
     protectedRanges: getProtectedCanvasRanges(block, blockRect, canvasScaleY),
+    preferredBreaks: getPreferredCanvasBreaks(block, blockRect, canvasScaleY),
+    minimumSliceHeight: getMinimumPdfSliceHeight(block, blockRect, canvasScaleY, width / canvas.width),
   };
 }
 
-function addFlowingCanvasToPdf(pdf, canvas, x, startY, renderedWidth, margin, contentHeight, pageBottom, protectedRanges = []) {
+function addFlowingCanvasToPdf(
+  pdf,
+  canvas,
+  x,
+  startY,
+  renderedWidth,
+  margin,
+  contentHeight,
+  pageBottom,
+  protectedRanges = [],
+  preferredBreaks = [],
+) {
   const scale = renderedWidth / canvas.width;
   const fullPageSourceHeight = Math.max(1, Math.floor(contentHeight / scale));
   let sourceY = 0;
@@ -5648,6 +5798,7 @@ function addFlowingCanvasToPdf(pdf, canvas, x, startY, renderedWidth, margin, co
       maxSourceHeight,
       protectedRanges,
       fullPageSourceHeight,
+      preferredBreaks,
     );
     const sliceHeight = Math.max(1, sourceEnd - sourceY);
     const sliceCanvas = document.createElement("canvas");
@@ -5666,7 +5817,14 @@ function addFlowingCanvasToPdf(pdf, canvas, x, startY, renderedWidth, margin, co
   return finalY;
 }
 
-function findSafeCanvasBreak(canvas, sourceY, maxSourceHeight, protectedRanges = [], fullPageSourceHeight = maxSourceHeight) {
+function findSafeCanvasBreak(
+  canvas,
+  sourceY,
+  maxSourceHeight,
+  protectedRanges = [],
+  fullPageSourceHeight = maxSourceHeight,
+  preferredBreaks = [],
+) {
   const hardEnd = Math.min(canvas.height, sourceY + maxSourceHeight);
   if (hardEnd >= canvas.height) return canvas.height;
 
@@ -5682,7 +5840,22 @@ function findSafeCanvasBreak(canvas, sourceY, maxSourceHeight, protectedRanges =
     if (beforeProtectedBlock >= searchStart) return beforeProtectedBlock;
   }
 
+  const semanticBreak = preferredBreaks
+    .filter((position) => position >= searchStart && position <= hardEnd && !isInsideProtectedRange(position, keepTogetherRanges))
+    .at(-1);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (semanticBreak) {
+    const nearbyBlankRow = findNearestBlankCanvasRow(
+      ctx,
+      canvas.width,
+      Math.floor(semanticBreak),
+      searchStart,
+      hardEnd,
+      keepTogetherRanges,
+    );
+    return Math.max(sourceY + 1, nearbyBlankRow ?? Math.floor(semanticBreak));
+  }
+
   let blankRun = 0;
   for (let y = hardEnd - 1; y >= searchStart; y -= 1) {
     if (isInsideProtectedRange(y, keepTogetherRanges)) {
@@ -5697,6 +5870,18 @@ function findSafeCanvasBreak(canvas, sourceY, maxSourceHeight, protectedRanges =
     }
   }
   return hardEnd;
+}
+
+function findNearestBlankCanvasRow(ctx, width, targetY, minY, maxY, protectedRanges = []) {
+  const radius = Math.min(24, Math.max(4, Math.floor((maxY - minY) * 0.04)));
+  for (let distance = 0; distance <= radius; distance += 1) {
+    const candidates = distance === 0 ? [targetY] : [targetY - distance, targetY + distance];
+    for (const candidate of candidates) {
+      if (candidate < minY || candidate > maxY || isInsideProtectedRange(candidate, protectedRanges)) continue;
+      if (isCanvasRowBlank(ctx, width, candidate)) return candidate;
+    }
+  }
+  return null;
 }
 
 function isCanvasRowBlank(ctx, width, y) {
@@ -5740,6 +5925,70 @@ function isAtomicPdfBlock(block) {
     && meaningfulChildren[0].matches(selector);
 }
 
+function shouldFitOversizedPdfBlock(block) {
+  if (block.matches("img")) return true;
+  if (block.matches("figure, .pdf-selection-note") && block.querySelector("img")) return true;
+  return false;
+}
+
+function getPreferredCanvasBreaks(block, blockRect, canvasScaleY) {
+  const breaks = [];
+  const addBreak = (value) => {
+    const normalized = Math.round(value);
+    if (normalized > 1 && normalized < blockRect.height * canvasScaleY - 1) breaks.push(normalized);
+  };
+
+  const code = block.matches(".study-code-block")
+    ? block.querySelector(".study-code-content")
+    : block.querySelector(":scope > .study-code-content");
+  if (code) {
+    const codeRect = code.getBoundingClientRect();
+    const codeStyle = window.getComputedStyle(code);
+    const lineHeight = readCssPixels(codeStyle.lineHeight) || readCssPixels(codeStyle.fontSize) * 1.65;
+    const contentTop = codeRect.top - blockRect.top + readCssPixels(codeStyle.paddingTop);
+    const contentBottom = codeRect.bottom - blockRect.top - readCssPixels(codeStyle.paddingBottom);
+    for (let lineBottom = contentTop + lineHeight; lineBottom < contentBottom; lineBottom += lineHeight) {
+      addBreak(lineBottom * canvasScaleY);
+    }
+  }
+
+  block.querySelectorAll("tr").forEach((row) => {
+    const rect = row.getBoundingClientRect();
+    addBreak((rect.bottom - blockRect.top) * canvasScaleY);
+  });
+
+  if (!breaks.length) {
+    Array.from(block.children).forEach((child) => {
+      if (child.matches("img, figure, table, .study-block, .study-code-block")) return;
+      const rect = child.getBoundingClientRect();
+      addBreak((rect.bottom - blockRect.top) * canvasScaleY);
+    });
+  }
+
+  return [...new Set(breaks)].sort((a, b) => a - b);
+}
+
+function getMinimumPdfSliceHeight(block, blockRect, canvasScaleY, canvasToPdfScale) {
+  if (block.matches(".study-code-block")) {
+    const code = block.querySelector(".study-code-content");
+    const header = block.querySelector(".study-code-header");
+    const codeStyle = code ? window.getComputedStyle(code) : null;
+    const lineHeight = codeStyle
+      ? readCssPixels(codeStyle.lineHeight) || readCssPixels(codeStyle.fontSize) * 1.65
+      : 24;
+    const headerHeight = header?.getBoundingClientRect().height || 0;
+    const firstLinesHeight = headerHeight + lineHeight * 3 + 16;
+    return Math.max(24, firstLinesHeight * canvasScaleY * canvasToPdfScale);
+  }
+  if (block.matches("table") || block.querySelector(":scope > table")) {
+    const firstRow = block.querySelector("tr");
+    if (firstRow) {
+      return Math.max(24, (firstRow.getBoundingClientRect().bottom - blockRect.top) * canvasScaleY * canvasToPdfScale);
+    }
+  }
+  return 35;
+}
+
 function getProtectedCanvasRanges(block, blockRect, canvasScaleY) {
   const selector = ".auto-toc, .study-block, .study-code-block, .pdf-selection-note, blockquote, table, figure, img";
   const protectedNodes = Array.from(block.querySelectorAll(selector)).filter((node) => {
@@ -5771,6 +6020,13 @@ function prepareNodeForPdfExport(node) {
   const element = node;
   element.style.breakInside = "avoid";
   element.style.pageBreakInside = "avoid";
+  if (element.matches("h1, h2, h3, h4")) {
+    element.style.boxSizing = "border-box";
+    element.style.lineHeight = "1.22";
+    element.style.paddingTop = "3px";
+    element.style.paddingBottom = "5px";
+    element.style.overflow = "visible";
+  }
   if (element.matches("img")) preparePdfImage(element);
   element.querySelectorAll?.("img").forEach(preparePdfImage);
   element.querySelectorAll?.(".study-block, .study-code-block, .pdf-selection-note, blockquote, table, figure").forEach((child) => {
