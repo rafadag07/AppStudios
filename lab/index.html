@@ -1,0 +1,50 @@
+<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AppStudios · Ensayo de migración</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f2eb;color:#213b3a;font:16px system-ui}main{max-width:1150px;margin:auto;padding:38px 22px}h1{font-size:clamp(28px,5vw,46px);margin:12px 0}h2{font-size:21px}p{line-height:1.6}.tag{font-weight:700;letter-spacing:.12em;font-size:12px}.notice{padding:16px;background:#e4ede7;border-radius:12px}section{background:white;padding:24px;border:1px solid #d9dfd9;border-radius:16px;margin:20px 0}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.device{padding:18px;background:#fafaf7;border-radius:12px;border:1px solid #e0e3dc}button,select{padding:10px;border-radius:7px;border:1px solid #bbc9c4;background:white;color:#213b3a;cursor:pointer}button.primary{background:#236358;color:white}button:disabled{opacity:.45;cursor:default}textarea{width:100%;min-height:140px;padding:12px;margin:14px 0;border:1px solid #bccbc6;border-radius:8px;font:inherit}label{display:block;margin:10px 0}small{display:block;color:#526864;margin:10px 0}.status{min-height:44px;font-size:14px}.versions{white-space:pre-wrap;font-size:14px;border-top:1px solid #ddd;padding-top:10px}.steps{display:flex;flex-wrap:wrap;gap:12px}.steps span{background:#f0f3ec;padding:12px;border-radius:8px}@media(max-width:800px){.grid{grid-template-columns:1fr}}
+</style><main><div class="tag">APPSTUDIOS / LABORATORIO LOCAL</div><h1>Tus apuntes, en todos tus dispositivos.</h1>
+<p>Ensayo aislado con datos ficticios. La nube y las cuentas se simulan en esta página. No conecta con Supabase ni lee los apuntes de tu app.</p>
+<div class="notice">Primero: descargar cada copia → comprobar archivos y contenido → revisar importación → confirmar. Crear una cuenta nunca sustituirá el archivo local.</div>
+<section><h2>1. Revisión antes de importar</h2><div class="steps"><span>Ordenador: copia pendiente</span><span>Móvil: copia pendiente</span><span>Tablet: copia pendiente</span><span>Nube real: acceso pendiente</span></div>
+<p>Ejemplo: 1 apunte ficticio, 0 adjuntos. Destino: cuenta de prueba Ana. Acción: añadir una copia; conservar el original.</p>
+<label><input id="verified" type="checkbox"> En este ensayo, simular copias verificadas.</label>
+<button class="primary" id="import" disabled>Confirmar importación ficticia</button><small id="import-status">La migración de datos reales permanece bloqueada.</small></section>
+<section><h2>2. Prueba la sincronización</h2><p>Escribe y espera 600 ms. Desconecta dos dispositivos, escribe versiones diferentes y reconéctalos. Ambas versiones quedarán disponibles para revisar. La cuenta Bea debe permanecer vacía.</p><div class="grid" id="devices"></div></section>
+<section><h2>3. Recuperar versiones</h2><p>Un conflicto no elimina ninguna versión. Elegir una versión crea una nueva revisión recuperable.</p><div id="history">Importa el ejemplo para comenzar.</div></section>
+<small>Laboratorio de protocolo: recargar reinicia el ensayo. El motor de producción requiere IndexedDB transaccional, servidor Supabase y pruebas reales de permisos antes de activarse.</small>
+</main><script type="module">
+import {TestServer, TestDevice} from './sync-model.js';
+const server = new TestServer();
+const devices = ['Ordenador','Móvil','Tablet'].map(name => new TestDevice(name, {}, server));
+const timers = new Map();
+const root = document.querySelector('#devices');
+for (const [index, device] of devices.entries()) {
+ device.login('ana');
+ const box = document.createElement('div'); box.className='device';
+ box.innerHTML=`<h2>${device.device}</h2><label>Cuenta de prueba <select><option value="ana">Ana</option><option value="bea">Bea</option></select></label><label><input type="checkbox" checked> Con conexión</label><textarea aria-label="Apunte ${device.device}" placeholder="Aún no hay apuntes"></textarea><div class="status"></div>`;
+ root.append(box); device.box=box;
+ box.querySelector('select').onchange=e=>{flush(device);device.login(e.target.value);device.sync();render();};
+ box.querySelector('input').onchange=e=>{device.online=e.target.checked;device.sync();render();};
+ box.querySelector('textarea').oninput=e=>{
+   // Persistencia de la cola simulada inmediata; envío tras la pausa.
+   device.edit('theme:demo', e.target.value);
+   clearTimeout(timers.get(device));timers.set(device,setTimeout(()=>{timers.delete(device);device.sync();render();},600));
+   box.querySelector('.status').textContent='Guardado local · pendiente de sincronizar';
+ };
+}
+function flush(device){clearTimeout(timers.get(device));timers.delete(device);device.sync();}
+function render(){
+ for(const d of devices){if(document.activeElement!==d.box.querySelector('textarea'))d.box.querySelector('textarea').value=d.view('theme:demo')||'';
+ const n=d.state.records.reduce((sum,r)=>sum+r.conflicts.length,0);
+ d.box.querySelector('.status').textContent=d.state.pending.length?`Guardado local · ${d.state.pending.length} cambios pendientes`:n?`${n} conflictos: versiones conservadas`:'Sincronizado con nube simulada';}
+ const history=document.querySelector('#history'); history.replaceChildren();
+ for(const row of server.read('ana'))for(const version of row.versions){
+ const line=document.createElement('div');line.className='versions';
+ const p=document.createElement('p');p.textContent=`${version.device} · ${version.id===row.head?'Actual':row.conflicts.includes(version.id)?'En conflicto':'Histórica'}: ${version.value}`;line.append(p);
+ const btn=document.createElement('button');btn.textContent='Recuperar esta versión';btn.onclick=()=>{const d=devices.find(d=>d.user==='ana'&&d.online);if(!d)return;flush(d);d.sync();d.edit(row.entity,version.value,row.conflicts);d.sync();devices.forEach(d=>d.sync());render();};line.append(btn);history.append(line);
+ }
+}
+document.querySelector('#verified').onchange=e=>document.querySelector('#import').disabled=!e.target.checked;
+document.querySelector('#import').onclick=()=>{const d=devices[0];d.login('ana');d.box.querySelector('select').value='ana';d.edit('theme:demo','Apunte de prueba: la memoria se refuerza con repaso espaciado.');d.sync();devices.forEach(d=>d.sync());document.querySelector('#import').disabled=true;document.querySelector('#verified').disabled=true;document.querySelector('#import-status').textContent='Ejemplo importado. El original ficticio se conserva. Ningún dato real ha sido leído.';render();};
+setInterval(()=>{devices.forEach(d=>{if(!timers.has(d))d.sync();});render();},1000);render();
+</script></html>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import * as pdfjsLib from "pdfjs-dist";
@@ -50,12 +50,33 @@ import {
   Trash2,
   Underline,
   Upload,
+  UserRound,
+  LogOut,
+  RefreshCw,
   Wand2,
   X,
 } from "lucide-react";
 import { STORAGE_KEY, createId, initialData } from "./data/schema";
 import { getStoredFile, saveStoredFile } from "./data/fileStore";
 import { readAppData, writeAppData } from "./data/appStorage";
+import { readAccountSnapshot, writeAccountSnapshot } from "./data/accountStorage";
+import { findMissingLocalAttachments, hydrateCloudAssets, normalizeAssetsForCloud } from "./data/cloudAssets";
+import {
+  createCloudProfile,
+  deleteOwnAccount,
+  downloadVersionSnapshot,
+  fetchCloudData,
+  getCurrentSession,
+  isSupabaseConfigured,
+  onCloudAuthChange,
+  sendPasswordReset,
+  signInWithPassword,
+  signOutCloud,
+  signUpWithPassword,
+  subscribeToCloudData,
+  updateCloudProfile,
+  uploadVersionSnapshot,
+} from "./data/supabaseClient";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -69,6 +90,19 @@ const POMODORO_JULY_22_ADJUSTMENT_KEY = "appstudios-pomodoro-july-22-2026-adjust
 const POMODORO_SETTINGS_KEY = "appstudios-pomodoro-settings-v1";
 const LOCAL_DATA_UPDATED_KEY = "appstudios-local-data-updated-at";
 const CLOUD_CHUNK_SIZE = 320000;
+const CloudAccountContext = createContext(null);
+const emptyAccountData = () => ({ subjects: [], tasks: [], resources: [], events: [], scheduleBlocks: [], __eventsClearedV2: true });
+const scopedKey = (key, scope) => (scope && scope !== "legacy" ? `${key}:user:${scope}` : key);
+
+function getDeviceId() {
+  const key = "appstudios-device-id-v1";
+  let value = localStorage.getItem(key);
+  if (!value) {
+    value = crypto.randomUUID();
+    localStorage.setItem(key, value);
+  }
+  return value;
+}
 const JULY_22_POMODORO_SESSIONS = [
   {
     id: "pomodoro-manual-2026-07-22-study-1",
@@ -226,7 +260,7 @@ function migrateSubjectQuestions(data) {
   });
 }
 
-function useGlobalPomodoro(data) {
+function useGlobalPomodoro(data, storageScope = "legacy", persistEnabled = true, onPersistentChange = () => {}) {
   const storedPomodoroSettings = (() => {
     try {
       return JSON.parse(localStorage.getItem(POMODORO_SETTINGS_KEY) || "{}");
@@ -297,13 +331,14 @@ function useGlobalPomodoro(data) {
   }, [data.subjects, selectedSubjectId]);
 
   useEffect(() => {
+    if (!persistEnabled) return undefined;
     const timer = window.setTimeout(() => {
       try {
-        localStorage.setItem(POMODORO_HISTORY_KEY, JSON.stringify(history));
-        if (history.some((session) => session.id === "pomodoro-manual-2026-07-17-20")) {
+        localStorage.setItem(scopedKey(POMODORO_HISTORY_KEY, storageScope), JSON.stringify(history));
+        if (storageScope === "legacy" && history.some((session) => session.id === "pomodoro-manual-2026-07-17-20")) {
           localStorage.setItem(POMODORO_JULY_ADJUSTMENT_KEY, "done");
         }
-        if (hasJuly22PomodoroSummary(history)) {
+        if (storageScope === "legacy" && hasJuly22PomodoroSummary(history)) {
           localStorage.setItem(POMODORO_JULY_22_ADJUSTMENT_KEY, "done");
         }
       } catch (error) {
@@ -311,15 +346,16 @@ function useGlobalPomodoro(data) {
       }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [history]);
+  }, [history, storageScope, persistEnabled]);
 
   useEffect(() => {
+    if (!persistEnabled) return;
     try {
-      localStorage.setItem(POMODORO_SETTINGS_KEY, JSON.stringify({ durations, selectedSubjectId }));
+      localStorage.setItem(scopedKey(POMODORO_SETTINGS_KEY, storageScope), JSON.stringify({ durations, selectedSubjectId }));
     } catch (error) {
       console.warn("No se ha podido guardar la configuracion de Pomodoro", error);
     }
-  }, [durations, selectedSubjectId]);
+  }, [durations, selectedSubjectId, storageScope, persistEnabled]);
 
   const notifyPomodoro = (title, body) => {
     if (!("Notification" in window)) return;
@@ -347,6 +383,7 @@ function useGlobalPomodoro(data) {
       createdAt: new Date().toISOString(),
     };
     setHistory((current) => [session, ...current].slice(0, 150));
+    onPersistentChange();
   };
 
   const start = () => {
@@ -386,6 +423,7 @@ function useGlobalPomodoro(data) {
       return next;
     });
     setRunning(false);
+    onPersistentChange();
   };
 
   const resetDurations = () => {
@@ -394,13 +432,23 @@ function useGlobalPomodoro(data) {
     setSeconds(25 * 60);
     setRunning(false);
     setCompletionPrompt(null);
+    onPersistentChange();
   };
 
-  const deleteSession = (sessionId) => setHistory((current) => current.filter((session) => session.id !== sessionId));
+  const deleteSession = (sessionId) => {
+    setHistory((current) => current.filter((session) => session.id !== sessionId));
+    onPersistentChange();
+  };
 
   const clearHistory = () => {
     if (!window.confirm("Borrar todo el historial de pomodoros?")) return;
     setHistory([]);
+    onPersistentChange();
+  };
+
+  const changeSelectedSubjectId = (value) => {
+    setSelectedSubjectId(value);
+    onPersistentChange();
   };
 
   const getSyncSnapshot = () => ({
@@ -464,7 +512,7 @@ function useGlobalPomodoro(data) {
 
   return {
     selectedSubjectId,
-    setSelectedSubjectId,
+    setSelectedSubjectId: changeSelectedSubjectId,
     selectedSubject,
     mode,
     durations,
@@ -498,10 +546,216 @@ function App() {
   const [modal, setModal] = useState(null);
   const [query, setQuery] = useState("");
   const [cloudInfo, setCloudInfo] = useState(null);
-  const [syncStatus, setSyncStatus] = useState("Nube manual");
+  const [syncStatus, setSyncStatus] = useState("Solo en este dispositivo");
   const [syncBusy, setSyncBusy] = useState(false);
+  const [session, setSession] = useState(null);
+  const [loadedAccountId, setLoadedAccountId] = useState(null);
+  const [accountNeedsSetup, setAccountNeedsSetup] = useState(false);
+  const [cloudHistory, setCloudHistory] = useState([]);
+  const [cloudConflicts, setCloudConflicts] = useState([]);
+  const [missingAttachments, setMissingAttachments] = useState([]);
+  const [dirtyVersion, setDirtyVersion] = useState(0);
+  const dirtyVersionRef = useRef(0);
   const latestDataRef = useRef(data);
-  const pomodoro = useGlobalPomodoro(data);
+  const legacyDataRef = useRef(null);
+  const legacyPomodoroRef = useRef(null);
+  const baseRevisionRef = useRef(null);
+  const baseUpdatedAtRef = useRef(null);
+  const applyingRemoteRef = useRef(false);
+  const syncInFlightRef = useRef(false);
+  const lastSyncedDirtyRef = useRef(0);
+  const accountId = session?.user?.id || null;
+  const accountReady = Boolean(accountId && loadedAccountId === accountId);
+  const bumpDirtyVersion = () => setDirtyVersion((value) => {
+    const next = value + 1;
+    dirtyVersionRef.current = next;
+    return next;
+  });
+  const markAccountDirty = () => {
+    if (accountId && accountReady && !applyingRemoteRef.current) bumpDirtyVersion();
+  };
+  const pomodoro = useGlobalPomodoro(data, accountId || "legacy", !accountId || accountReady, markAccountDirty);
+
+  const applyAccountSnapshot = async (userId, snapshot, status) => {
+    applyingRemoteRef.current = true;
+    try {
+      const nextData = await hydrateCloudAssets(userId, snapshot.data, (done, total) => setSyncStatus(`Preparando imagenes ${done}/${total}`));
+      migrateSubjectQuestions(nextData);
+      latestDataRef.current = nextData;
+      setData(nextData);
+      pomodoro.importSyncSnapshot(snapshot.pomodoro || { history: [], durations: { study: 25, short: 5, long: 15 } });
+      setMissingAttachments([...(snapshot.missingAttachments || findMissingLocalAttachments(nextData)), ...(snapshot.omittedAttachments || [])]);
+      setSyncStatus(status);
+      await writeAccountSnapshot(userId, { data: nextData, pomodoro: snapshot.pomodoro, revision: snapshot.revision, updatedAt: snapshot.updatedAt });
+    } finally {
+      window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
+    }
+  };
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return undefined;
+    let active = true;
+    getCurrentSession().then((current) => { if (active) setSession(current); }).catch((error) => setSyncStatus(error.message));
+    const unsubscribe = onCloudAuthChange((nextSession) => {
+      setLoadedAccountId(null);
+      setSession(nextSession);
+    });
+    return () => { active = false; unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return undefined;
+    let active = true;
+    const loadAccount = async () => {
+      if (!accountId) {
+        if (legacyDataRef.current) {
+          applyingRemoteRef.current = true;
+          const legacy = (await readAppData())?.data || legacyDataRef.current;
+          setData(legacy);
+          pomodoro.importSyncSnapshot(legacyPomodoroRef.current || {
+            history: JSON.parse(localStorage.getItem(POMODORO_HISTORY_KEY) || "[]"),
+            durations: JSON.parse(localStorage.getItem(POMODORO_SETTINGS_KEY) || "{}").durations,
+          });
+          window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
+        }
+        setSyncStatus("Solo en este dispositivo");
+        return;
+      }
+
+      if (!legacyDataRef.current) {
+        legacyDataRef.current = structuredClone(latestDataRef.current);
+        legacyPomodoroRef.current = pomodoro.getSyncSnapshot();
+      }
+      setSyncBusy(true);
+      setAccountNeedsSetup(false);
+      setSyncStatus(navigator.onLine ? "Cargando tu cuenta..." : "Sin conexion: abriendo copia local");
+      try {
+        const local = await readAccountSnapshot(accountId);
+        if (local?.data && active) {
+          applyingRemoteRef.current = true;
+          setData(local.data);
+          pomodoro.importSyncSnapshot(local.pomodoro);
+          baseRevisionRef.current = local.revision || null;
+          window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
+        }
+        if (navigator.onLine) {
+          const row = await fetchCloudData(accountId);
+          if (row?.data?.state || row?.data?.subjects) {
+            const envelope = row.data.state ? row.data : { revision: `legacy-${row.updated_at}`, updatedAt: row.updated_at, state: row.data, pomodoro: null, history: [] };
+            await applyAccountSnapshot(accountId, {
+              data: envelope.state,
+              pomodoro: envelope.pomodoro,
+              revision: envelope.revision,
+              updatedAt: row.updated_at,
+              missingAttachments: envelope.missingAttachments,
+              omittedAttachments: envelope.omittedAttachments,
+            }, "Sincronizado");
+            baseRevisionRef.current = envelope.revision;
+            baseUpdatedAtRef.current = row.updated_at;
+            setCloudHistory(envelope.history || []);
+            setCloudConflicts(envelope.conflicts || []);
+            setCloudInfo({ updatedAt: row.updated_at });
+          } else if (!local?.data) {
+            applyingRemoteRef.current = true;
+            setData(emptyAccountData());
+            pomodoro.importSyncSnapshot({ history: [], durations: { study: 25, short: 5, long: 15 }, selectedSubjectId: "" });
+            setAccountNeedsSetup(true);
+            setSyncStatus("Cuenta nueva: elige como empezar");
+            window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
+          }
+        } else if (!local?.data) {
+          setData(emptyAccountData());
+          setSyncStatus("Esta cuenta necesita conectarse por primera vez");
+        }
+        if (active) {
+          setLoadedAccountId(accountId);
+          lastSyncedDirtyRef.current = dirtyVersionRef.current;
+        }
+      } catch (error) {
+        console.error(error);
+        setSyncStatus(`No se ha podido abrir la cuenta: ${error.message}`);
+      } finally {
+        if (active) setSyncBusy(false);
+      }
+    };
+    loadAccount();
+    return () => { active = false; };
+  }, [accountId, storageReady]);
+
+  const recordConflict = async (row, normalized, pomodoroSnapshot) => {
+    const conflictRevision = crypto.randomUUID();
+    const path = await uploadVersionSnapshot(accountId, conflictRevision, { data: normalized, pomodoro: pomodoroSnapshot });
+    const conflict = { revision: conflictRevision, path, deviceId: getDeviceId(), createdAt: new Date().toISOString() };
+    const next = { ...row.data, conflicts: [...(row.data.conflicts || []), conflict] };
+    const saved = await updateCloudProfile(accountId, row.updated_at, next);
+    if (!saved) throw new Error("La nube cambio mientras se guardaba el conflicto. Se reintentara.");
+    setCloudConflicts(next.conflicts);
+    setSyncStatus("Hay dos versiones. Se han conservado las dos para revisarlas.");
+  };
+
+  const syncAccountNow = async ({ force = false } = {}) => {
+    if (!accountReady || accountNeedsSetup || !navigator.onLine || syncInFlightRef.current) return;
+    syncInFlightRef.current = true;
+    const syncingVersion = dirtyVersionRef.current;
+    let completed = false;
+    setSyncBusy(true);
+    try {
+      setSyncStatus("Preparando cambios...");
+      const pomodoroSnapshot = pomodoro.getSyncSnapshot();
+      const normalized = await normalizeAssetsForCloud(accountId, latestDataRef.current, (done, total) => setSyncStatus(`Subiendo imagenes ${done}/${total}`));
+      let row = await fetchCloudData(accountId);
+      const missing = findMissingLocalAttachments(latestDataRef.current);
+      if (!row) {
+        const revision = crypto.randomUUID();
+        const envelope = { format: "appstudios-cloud-v3", revision, updatedAt: new Date().toISOString(), deviceId: getDeviceId(), state: normalized.data, pomodoro: pomodoroSnapshot, history: [], conflicts: [], missingAttachments: missing };
+        row = await createCloudProfile(accountId, envelope);
+      } else {
+        const current = row.data?.state ? row.data : { format: "appstudios-cloud-v3", revision: `legacy-${row.updated_at}`, updatedAt: row.updated_at, deviceId: "legacy", state: row.data, pomodoro: null, history: [], conflicts: [] };
+        if (!force && baseRevisionRef.current && current.revision !== baseRevisionRef.current) {
+          await recordConflict(row, normalized.data, pomodoroSnapshot);
+          return;
+        }
+        const versionPath = await uploadVersionSnapshot(accountId, current.revision, { data: current.state, pomodoro: current.pomodoro });
+        const revision = crypto.randomUUID();
+        const envelope = {
+          ...current,
+          revision,
+          updatedAt: new Date().toISOString(),
+          deviceId: getDeviceId(),
+          state: normalized.data,
+          pomodoro: pomodoroSnapshot,
+          history: [{ revision: current.revision, path: versionPath, updatedAt: current.updatedAt || row.updated_at, deviceId: current.deviceId }, ...(current.history || [])].slice(0, 20),
+          conflicts: force ? [] : (current.conflicts || []),
+          missingAttachments: missing,
+          omittedAttachments: current.omittedAttachments || [],
+        };
+        const saved = await updateCloudProfile(accountId, row.updated_at, envelope);
+        if (!saved) {
+          const changed = await fetchCloudData(accountId);
+          await recordConflict(changed, normalized.data, pomodoroSnapshot);
+          return;
+        }
+        row = saved;
+      }
+      baseRevisionRef.current = row.data.revision;
+      baseUpdatedAtRef.current = row.updated_at;
+      setCloudHistory(row.data.history || []);
+      setCloudConflicts(row.data.conflicts || []);
+      setMissingAttachments([...(row.data.missingAttachments || []), ...(row.data.omittedAttachments || [])]);
+      setCloudInfo({ updatedAt: row.updated_at });
+      setSyncStatus("Sincronizado");
+      lastSyncedDirtyRef.current = syncingVersion;
+      completed = true;
+      await writeAccountSnapshot(accountId, { data: latestDataRef.current, pomodoro: pomodoroSnapshot, revision: row.data.revision, updatedAt: row.updated_at });
+    } catch (error) {
+      console.error(error);
+      setSyncStatus(`Pendiente de sincronizar: ${error.message}`);
+    } finally {
+      syncInFlightRef.current = false;
+      setSyncBusy(false);
+      if (completed && dirtyVersionRef.current > lastSyncedDirtyRef.current) window.setTimeout(() => syncAccountNow(), 0);
+    }
+  };
 
   const syncRequest = async (options = {}) => {
     const controller = new AbortController();
@@ -581,6 +835,7 @@ function App() {
     migrateSubjectQuestions(importedData);
     setData(importedData);
     if (importedPomodoro) pomodoro.importSyncSnapshot(importedPomodoro);
+    if (accountReady) bumpDirtyVersion();
     localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
     setSyncStatus(importedPomodoro ? `${status} (incluye Pomodoro)` : status);
   };
@@ -723,17 +978,17 @@ function App() {
   }, []);
 
   useEffect(() => {
-    refreshManualCloudInfo();
-  }, []);
-
-  useEffect(() => {
-    if (!storageReady) return undefined;
+    if (!storageReady || (accountId && !accountReady)) return undefined;
     setLocalSaveStatus("Guardando en este dispositivo...");
     const timer = window.setTimeout(async () => {
       try {
-        await writeAppData(data);
-        localStorage.removeItem(STORAGE_KEY);
-        localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
+        if (accountId) {
+          await writeAccountSnapshot(accountId, { data, pomodoro: pomodoro.getSyncSnapshot(), revision: baseRevisionRef.current, updatedAt: baseUpdatedAtRef.current });
+        } else {
+          await writeAppData(data);
+          localStorage.removeItem(STORAGE_KEY);
+          localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
+        }
         setLocalSaveStatus("Guardado en este dispositivo");
       } catch (error) {
         console.error(error);
@@ -741,17 +996,51 @@ function App() {
       }
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [data, storageReady]);
+  }, [data, storageReady, accountId, accountReady, pomodoro.history, pomodoro.durations, pomodoro.selectedSubjectId]);
 
   useEffect(() => {
-    if (!storageReady) return undefined;
+    if (!storageReady || (accountId && !accountReady)) return undefined;
     const saveWhenHidden = () => {
       if (document.visibilityState !== "hidden") return;
-      writeAppData(latestDataRef.current).catch((error) => console.error("Guardado al salir interrumpido", error));
+      const save = accountId
+        ? writeAccountSnapshot(accountId, { data: latestDataRef.current, pomodoro: pomodoro.getSyncSnapshot(), revision: baseRevisionRef.current, updatedAt: baseUpdatedAtRef.current })
+        : writeAppData(latestDataRef.current);
+      save.catch((error) => console.error("Guardado al salir interrumpido", error));
     };
     document.addEventListener("visibilitychange", saveWhenHidden);
     return () => document.removeEventListener("visibilitychange", saveWhenHidden);
-  }, [storageReady]);
+  }, [storageReady, accountId, accountReady]);
+
+  useEffect(() => {
+    if (!accountReady || accountNeedsSetup || dirtyVersion === lastSyncedDirtyRef.current) return undefined;
+    const timer = window.setTimeout(() => syncAccountNow(), 1200);
+    return () => window.clearTimeout(timer);
+  }, [dirtyVersion, accountReady, accountNeedsSetup]);
+
+  useEffect(() => {
+    if (!accountReady) return undefined;
+    const syncWhenOnline = () => syncAccountNow();
+    const syncWhenVisible = () => { if (document.visibilityState === "visible") syncAccountNow(); };
+    window.addEventListener("online", syncWhenOnline);
+    document.addEventListener("visibilitychange", syncWhenVisible);
+    const unsubscribe = subscribeToCloudData(accountId, (row) => {
+      if (row?.data?.revision && row.data.revision !== baseRevisionRef.current && dirtyVersion === lastSyncedDirtyRef.current) {
+        fetchCloudData(accountId).then(async (fresh) => {
+          if (!fresh?.data?.state) return;
+          await applyAccountSnapshot(accountId, { data: fresh.data.state, pomodoro: fresh.data.pomodoro, revision: fresh.data.revision, updatedAt: fresh.updated_at, missingAttachments: fresh.data.missingAttachments, omittedAttachments: fresh.data.omittedAttachments }, "Actualizado desde otro dispositivo");
+          baseRevisionRef.current = fresh.data.revision;
+          baseUpdatedAtRef.current = fresh.updated_at;
+          setCloudHistory(fresh.data.history || []);
+          setCloudConflicts(fresh.data.conflicts || []);
+        }).catch((error) => setSyncStatus(error.message));
+      }
+    });
+    return () => {
+      window.removeEventListener("online", syncWhenOnline);
+      document.removeEventListener("visibilitychange", syncWhenVisible);
+      unsubscribe();
+    };
+  }, [accountReady, accountId, dirtyVersion]);
 
   const allThemes = useMemo(
     () => data.subjects.flatMap((subject) => subject.themes.map((theme) => ({ ...theme, subject }))),
@@ -777,13 +1066,127 @@ function App() {
     );
   }
 
-  const updateData = (recipe) => setData((current) => recipe(structuredClone(current)));
+  const registerAccount = async (credentials) => {
+    setSyncBusy(true);
+    setSyncStatus("Creando cuenta...");
+    try {
+      const result = await signUpWithPassword(credentials);
+      if (result.session) {
+        setSession(result.session);
+        setSyncStatus("Cuenta creada");
+      } else {
+        setSyncStatus("Cuenta creada. Revisa tu correo para confirmarla.");
+      }
+      return result;
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const loginAccount = async (credentials) => {
+    setSyncBusy(true);
+    setSyncStatus("Iniciando sesion...");
+    try {
+      const result = await signInWithPassword(credentials);
+      setSession(result.session);
+      return result;
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const logoutAccount = async () => {
+    await signOutCloud();
+    setLoadedAccountId(null);
+    setSession(null);
+  };
+
+  const removeAccount = async () => {
+    if (!window.confirm("Se eliminara definitivamente la cuenta y todos sus datos de la nube. Las copias descargadas no se borraran. Continuar?")) return;
+    await deleteOwnAccount();
+    setLoadedAccountId(null);
+    setSession(null);
+  };
+
+  const startAccountWithLocalData = async () => {
+    if (!accountId || !legacyDataRef.current) return;
+    applyingRemoteRef.current = true;
+    const next = structuredClone(legacyDataRef.current);
+    setData(next);
+    pomodoro.importSyncSnapshot(legacyPomodoroRef.current);
+    setAccountNeedsSetup(false);
+    setLoadedAccountId(accountId);
+    setMissingAttachments(findMissingLocalAttachments(next));
+    applyingRemoteRef.current = false;
+    bumpDirtyVersion();
+  };
+
+  const startEmptyAccount = () => {
+    applyingRemoteRef.current = true;
+    setData(emptyAccountData());
+    pomodoro.importSyncSnapshot({ history: [], durations: { study: 25, short: 5, long: 15 }, selectedSubjectId: "" });
+    setAccountNeedsSetup(false);
+    setLoadedAccountId(accountId);
+    applyingRemoteRef.current = false;
+    bumpDirtyVersion();
+  };
+
+  const restoreCloudVersion = async (version) => {
+    if (!version?.path || !accountId) return;
+    setSyncBusy(true);
+    try {
+      const snapshot = await downloadVersionSnapshot(version.path);
+      await applyAccountSnapshot(accountId, { ...snapshot, revision: version.revision, updatedAt: version.updatedAt }, "Version recuperada; guardando como nueva version...");
+      bumpDirtyVersion();
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const useCloudAfterConflict = async () => {
+    const row = await fetchCloudData(accountId);
+    if (!row?.data?.state) return;
+    await applyAccountSnapshot(accountId, { data: row.data.state, pomodoro: row.data.pomodoro, revision: row.data.revision, updatedAt: row.updated_at, missingAttachments: row.data.missingAttachments, omittedAttachments: row.data.omittedAttachments }, "Version de la nube aplicada");
+    baseRevisionRef.current = row.data.revision;
+    baseUpdatedAtRef.current = row.updated_at;
+    lastSyncedDirtyRef.current = dirtyVersionRef.current;
+  };
+
+  const updateData = (recipe) => {
+    setData((current) => recipe(structuredClone(current)));
+    markAccountDirty();
+  };
 
   const currentSubject = view.subjectId ? data.subjects.find((subject) => subject.id === view.subjectId) : null;
   const currentTheme = currentSubject?.themes.find((theme) => theme.id === view.themeId);
   const currentMedia = currentTheme?.media?.find((file) => file.id === view.mediaId);
 
+  const cloudAccount = {
+    configured: isSupabaseConfigured,
+    session,
+    ready: accountReady,
+    needsSetup: accountNeedsSetup,
+    status: syncStatus,
+    busy: syncBusy,
+    history: cloudHistory,
+    conflicts: cloudConflicts,
+    missingAttachments,
+    register: registerAccount,
+    login: loginAccount,
+    logout: logoutAccount,
+    deleteAccount: removeAccount,
+    resetPassword: sendPasswordReset,
+    syncNow: syncAccountNow,
+    startWithLocalData: startAccountWithLocalData,
+    startEmpty: startEmptyAccount,
+    restoreVersion: restoreCloudVersion,
+    keepLocalConflict: () => syncAccountNow({ force: true }),
+    useCloudAfterConflict,
+    exportBackup: exportLocalBackup,
+  };
+
   return (
+    <CloudAccountContext.Provider value={cloudAccount}>
     <div className="min-h-screen bg-[#f7f4ee] text-slate-900 campus-grid">
       <Shell
         view={view}
@@ -847,6 +1250,7 @@ function App() {
       {pomodoro.completionPrompt === "study-complete" && <PomodoroBreakPrompt pomodoro={pomodoro} />}
       {modal && <EditorModal modal={modal} close={() => setModal(null)} data={data} updateData={updateData} />}
     </div>
+    </CloudAccountContext.Provider>
   );
 }
 
@@ -1031,12 +1435,15 @@ function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, s
 }
 
 function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadCloud, onExportBackup, onImportBackup, full = false, mobile = false }) {
+  const account = useContext(CloudAccountContext);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
-  const importInputRef = useRef(null);
-  const updatedLabel = cloudInfo?.updatedAt ? new Date(cloudInfo.updatedAt).toLocaleString("es-ES") : "Sin copia subida todavia";
+  const [authMode, setAuthMode] = useState("login");
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const user = account?.session?.user;
+  const displayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Mi cuenta";
 
-  const runAction = async (action, fallback) => {
+  const runAction = async (action, fallback = "No se ha podido completar la accion.") => {
     setError("");
     try {
       await action?.();
@@ -1045,11 +1452,13 @@ function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadClo
     }
   };
 
-  const importBackup = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    await runAction(() => onImportBackup?.(file), "No se ha podido importar la copia.");
+  const submitAuth = async (event) => {
+    event.preventDefault();
+    const credentials = { email: form.email.trim(), password: form.password, name: form.name.trim() };
+    await runAction(
+      () => authMode === "register" ? account.register(credentials) : account.login(credentials),
+      authMode === "register" ? "No se ha podido crear la cuenta." : "Correo o contraseña incorrectos."
+    );
   };
 
   return (
@@ -1057,60 +1466,106 @@ function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadClo
       <button
         onClick={() => setOpen((value) => !value)}
         className={`${full ? "inline-flex w-full justify-center" : mobile ? "inline-flex" : "hidden md:inline-flex"} h-11 items-center gap-2 rounded-lg px-4 text-sm font-black shadow-sm ${
-          cloudInfo?.updatedAt ? "bg-[#dcebdc] text-[#1f5d55]" : "bg-white text-slate-700"
+          user ? "bg-[#dcebdc] text-[#1f5d55]" : "bg-white text-slate-700"
         }`}
-        title="Nube manual"
+        title={user ? `Cuenta de ${displayName}` : "Crear cuenta o iniciar sesion"}
       >
-        <Cloud size={18} />
-        Nube
+        {user ? <UserRound size={18} /> : <Cloud size={18} />}
+        {user ? displayName : "Cuenta"}
       </button>
       {open && (
-        <div className={`${mobile ? "fixed bottom-20 left-4 right-4" : "absolute right-0 top-12 w-80"} z-50 rounded-lg border border-slate-900/10 bg-white p-4 shadow-soft`}>
+        <div className={`${mobile ? "fixed bottom-20 left-4 right-4 max-h-[75vh]" : "absolute right-0 top-12 w-96 max-h-[78vh]"} z-50 overflow-y-auto rounded-lg border border-slate-900/10 bg-white p-4 shadow-soft`}>
           <div className="flex items-start gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-lg bg-[#dcebdc] text-[#1f5d55]">
-              <Cloud size={19} />
+              {user ? <UserRound size={19} /> : <Cloud size={19} />}
             </span>
             <div>
-              <h2 className="font-black">Nube manual</h2>
-              <p className="text-sm text-slate-500">{status}</p>
+              <h2 className="font-black">{user ? displayName : "Tu cuenta AppStudios"}</h2>
+              <p className="break-all text-sm text-slate-500">{user?.email || "Sincroniza tus estudios en todos tus dispositivos"}</p>
             </div>
           </div>
 
-          <div className="mt-4 space-y-3">
-            <div className="rounded-lg bg-slate-50 p-3">
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Ultima copia</p>
-              <p className="mt-1 text-sm font-black text-slate-700">{updatedLabel}</p>
-            </div>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => runAction(onUploadCloud, "No se han podido subir los datos.")}
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#172033] px-3 text-sm font-black text-white disabled:opacity-60"
-            >
-              <Upload size={16} /> Subir datos de este dispositivo
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => runAction(onDownloadCloud, "No se han podido actualizar los datos.")}
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#dcebdc] px-3 text-sm font-black text-[#1f5d55] disabled:opacity-60"
-            >
-              <Download size={16} /> Actualizar desde la nube
-            </button>
-            <div className="grid grid-cols-2 gap-2 border-t border-slate-200 pt-3">
-              <button type="button" onClick={onExportBackup} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 text-xs font-black text-slate-700">
-                <Download size={15} /> Copia
+          {!account?.configured && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm font-bold text-red-700">Falta configurar Supabase en este despliegue.</p>}
+
+          {!user && account?.configured && (
+            <form className="mt-4 space-y-3" onSubmit={submitAuth}>
+              <div className="grid grid-cols-2 rounded-lg bg-slate-100 p-1 text-sm font-black">
+                <button type="button" onClick={() => setAuthMode("login")} className={`rounded-md px-3 py-2 ${authMode === "login" ? "bg-white shadow-sm" : "text-slate-500"}`}>Iniciar sesion</button>
+                <button type="button" onClick={() => setAuthMode("register")} className={`rounded-md px-3 py-2 ${authMode === "register" ? "bg-white shadow-sm" : "text-slate-500"}`}>Crear cuenta</button>
+              </div>
+              {authMode === "register" && (
+                <label className="block text-sm font-bold text-slate-700">Nombre
+                  <input required value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:ring-4 focus:ring-emerald-100" autoComplete="name" />
+                </label>
+              )}
+              <label className="block text-sm font-bold text-slate-700">Correo
+                <input required type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:ring-4 focus:ring-emerald-100" autoComplete="email" />
+              </label>
+              <label className="block text-sm font-bold text-slate-700">Contraseña
+                <input required minLength={8} type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:ring-4 focus:ring-emerald-100" autoComplete={authMode === "register" ? "new-password" : "current-password"} />
+              </label>
+              <button disabled={account.busy} className="flex h-11 w-full items-center justify-center rounded-lg bg-[#172033] px-4 text-sm font-black text-white disabled:opacity-60">
+                {account.busy ? "Procesando..." : authMode === "register" ? "Crear mi cuenta" : "Entrar"}
               </button>
-              <button type="button" onClick={() => importInputRef.current?.click()} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 text-xs font-black text-slate-700">
-                <Upload size={15} /> Importar
-              </button>
+              {authMode === "login" && (
+                <button type="button" disabled={!form.email.trim()} onClick={() => runAction(() => account.resetPassword(form.email.trim()), "No se ha podido enviar el correo de recuperacion.")} className="w-full text-center text-xs font-black text-[#2f6f73] disabled:opacity-40">He olvidado mi contraseña</button>
+              )}
+              {account.status && account.status !== "Solo en este dispositivo" && <p className="rounded-lg bg-slate-50 p-2 text-xs font-bold text-slate-600">{account.status}</p>}
+              <p className="text-xs leading-5 text-slate-500">Al entrar no se sustituyen los datos locales sin identificar. Cada cuenta mantiene su propio espacio privado.</p>
+            </form>
+          )}
+
+          {user && (
+            <div className="mt-4 space-y-3">
+              <div className="rounded-lg bg-slate-50 p-3">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Estado</p>
+                <p className="mt-1 text-sm font-black text-slate-700">{account.status}</p>
+              </div>
+              {account.needsSetup && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-sm font-black text-amber-900">Esta cuenta todavía no tiene datos.</p>
+                  <p className="mt-1 text-xs text-amber-800">Elige una opción. La copia local original se conservará.</p>
+                  <button type="button" onClick={() => runAction(account.startWithLocalData)} className="mt-3 h-10 w-full rounded-lg bg-[#172033] px-3 text-xs font-black text-white">Copiar estos datos a mi cuenta</button>
+                  <button type="button" onClick={() => runAction(account.startEmpty)} className="mt-2 h-10 w-full rounded-lg bg-white px-3 text-xs font-black text-slate-700">Empezar con cuenta vacia</button>
+                </div>
+              )}
+              {!account.needsSetup && (
+                <button type="button" disabled={account.busy || !navigator.onLine} onClick={() => runAction(account.syncNow)} className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#172033] px-3 text-sm font-black text-white disabled:opacity-60">
+                  <RefreshCw size={16} /> {account.busy ? "Sincronizando..." : "Sincronizar ahora"}
+                </button>
+              )}
+              {account.missingAttachments.length > 0 && <p className="rounded-lg bg-yellow-50 p-3 text-xs font-bold text-yellow-800">La copia de Rafael omite {account.missingAttachments.length} adjuntos antiguos, tal como se decidió. El resto de datos sí se sincroniza.</p>}
+              {account.conflicts.length > 0 && (
+                <div className="rounded-lg border border-orange-200 p-3">
+                  <p className="text-sm font-black text-orange-800">Hay {account.conflicts.length} version(es) en conflicto.</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => runAction(account.keepLocalConflict)} className="rounded-lg bg-orange-100 px-2 py-2 text-xs font-black text-orange-900">Conservar esta</button>
+                    <button type="button" onClick={() => runAction(account.useCloudAfterConflict)} className="rounded-lg bg-slate-100 px-2 py-2 text-xs font-black text-slate-700">Usar la nube</button>
+                  </div>
+                </div>
+              )}
+              {account.history.length > 0 && (
+                <details className="rounded-lg border border-slate-200 p-3">
+                  <summary className="cursor-pointer text-sm font-black">Recuperar versiones anteriores</summary>
+                  <div className="mt-2 max-h-48 space-y-2 overflow-y-auto">
+                    {account.history.map((version) => (
+                      <button key={version.revision} type="button" onClick={() => runAction(() => account.restoreVersion(version))} className="block w-full rounded-lg bg-slate-50 p-2 text-left text-xs font-bold text-slate-700">
+                        {new Date(version.updatedAt).toLocaleString("es-ES")}
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              )}
+              <button type="button" onClick={account.exportBackup || onExportBackup} className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 text-xs font-black text-slate-700"><Download size={15} /> Descargar copia independiente</button>
+              <button type="button" onClick={() => runAction(account.logout)} className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-xs font-black text-slate-600"><LogOut size={15} /> Cerrar sesion</button>
+              <details className="rounded-lg border border-red-100 p-3">
+                <summary className="cursor-pointer text-xs font-black text-red-700">Eliminar mi cuenta y datos</summary>
+                <p className="my-2 text-xs text-slate-500">Descarga primero una copia si quieres conservarla. Esta accion elimina la cuenta de Supabase, sus datos y archivos asociados.</p>
+                <button type="button" onClick={() => runAction(account.deleteAccount)} className="h-9 w-full rounded-lg bg-red-50 text-xs font-black text-red-700">Eliminar definitivamente</button>
+              </details>
             </div>
-            <input ref={importInputRef} type="file" accept="application/json,.json" className="hidden" onChange={importBackup} />
-            <p className="rounded-lg bg-yellow-50 p-3 text-xs font-bold text-yellow-800">
-              Incluye asignaturas, apuntes, archivos, historial y tiempos de Pomodoro. Sube solo desde el dispositivo que tenga la version buena.
-            </p>
-            {error && <p className="text-sm font-bold text-red-600">{error}</p>}
-          </div>
+          )}
+          {error && <p className="mt-3 text-sm font-bold text-red-600">{error}</p>}
         </div>
       )}
     </div>

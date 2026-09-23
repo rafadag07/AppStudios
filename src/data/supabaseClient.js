@@ -30,6 +30,42 @@ export async function signInWithEmail(email) {
   if (error) throw error;
 }
 
+export async function signUpWithPassword({ email, password, name }) {
+  if (!supabase) throw new Error("Supabase no esta configurado.");
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { full_name: name }, emailRedirectTo: window.location.origin },
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function signInWithPassword({ email, password }) {
+  if (!supabase) throw new Error("Supabase no esta configurado.");
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+export async function sendPasswordReset(email) {
+  if (!supabase) throw new Error("Supabase no esta configurado.");
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+  if (error) throw error;
+}
+
+export async function deleteOwnAccount() {
+  if (!supabase) throw new Error("Supabase no esta configurado.");
+  const { error } = await supabase.rpc("delete_my_account");
+  if (error) throw error;
+}
+
+export function onCloudAuthChange(callback) {
+  if (!supabase) return () => {};
+  const { data } = supabase.auth.onAuthStateChange((_event, session) => callback(session));
+  return () => data.subscription.unsubscribe();
+}
+
 export async function signOutCloud() {
   if (!supabase) return;
   await supabase.auth.signOut();
@@ -67,6 +103,46 @@ export async function saveCloudData(userId, data) {
     updated_at: new Date().toISOString(),
   });
   if (error) throw error;
+}
+
+export async function createCloudProfile(userId, data) {
+  const { data: row, error } = await supabase.from("campus_profiles").insert({ user_id: userId, data }).select("data, updated_at").single();
+  if (error) throw error;
+  return row;
+}
+
+export async function updateCloudProfile(userId, expectedUpdatedAt, data) {
+  const { data: rows, error } = await supabase
+    .from("campus_profiles")
+    .update({ data, updated_at: new Date().toISOString() })
+    .eq("user_id", userId)
+    .eq("updated_at", expectedUpdatedAt)
+    .select("data, updated_at");
+  if (error) throw error;
+  return rows?.[0] || null;
+}
+
+export async function uploadCloudObject(path, blob, { upsert = false, ignoreExisting = false } = {}) {
+  const { error } = await supabase.storage.from("campus-files").upload(path, blob, { upsert, contentType: blob.type || "application/octet-stream" });
+  if (error && !(ignoreExisting && (error.statusCode === "409" || /already exists|duplicate/i.test(error.message)))) throw error;
+  return path;
+}
+
+export async function downloadCloudObject(path) {
+  const { data, error } = await supabase.storage.from("campus-files").download(path);
+  if (error) throw error;
+  return data;
+}
+
+export async function uploadVersionSnapshot(userId, revision, snapshot) {
+  const path = `${userId}/versions/${revision}.json`;
+  await uploadCloudObject(path, new Blob([JSON.stringify(snapshot)], { type: "application/json" }), { upsert: false, ignoreExisting: true });
+  return path;
+}
+
+export async function downloadVersionSnapshot(path) {
+  const blob = await downloadCloudObject(path);
+  return JSON.parse(await blob.text());
 }
 
 export function subscribeToCloudData(userId, onChange) {
