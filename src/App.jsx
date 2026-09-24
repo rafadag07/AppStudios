@@ -18,6 +18,8 @@ import {
   Cloud,
   Clock3,
   Download,
+  Eye,
+  EyeOff,
   HelpCircle,
   FileText,
   Grid3X3,
@@ -56,7 +58,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import { STORAGE_KEY, createId, initialData } from "./data/schema";
+import { STORAGE_KEY, createId } from "./data/schema";
 import { getStoredFile, saveStoredFile } from "./data/fileStore";
 import { readAppData, writeAppData } from "./data/appStorage";
 import { readAccountSnapshot, writeAccountSnapshot } from "./data/accountStorage";
@@ -230,7 +232,7 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 function readStoredData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : structuredClone(initialData);
+    const parsed = raw ? JSON.parse(raw) : emptyAccountData();
     migrateSubjectQuestions(parsed);
     if (!parsed.__eventsClearedV2) {
       parsed.events = [];
@@ -238,7 +240,7 @@ function readStoredData() {
     }
     return parsed;
   } catch {
-    const fallback = { ...structuredClone(initialData), events: [], __eventsClearedV2: true };
+    const fallback = emptyAccountData();
     migrateSubjectQuestions(fallback);
     return fallback;
   }
@@ -262,8 +264,9 @@ function migrateSubjectQuestions(data) {
 
 function useGlobalPomodoro(data, storageScope = "legacy", persistEnabled = true, onPersistentChange = () => {}) {
   const storedPomodoroSettings = (() => {
+    if (storageScope === "guest") return {};
     try {
-      return JSON.parse(localStorage.getItem(POMODORO_SETTINGS_KEY) || "{}");
+      return JSON.parse(localStorage.getItem(scopedKey(POMODORO_SETTINGS_KEY, storageScope)) || "{}");
     } catch {
       return {};
     }
@@ -288,9 +291,11 @@ function useGlobalPomodoro(data, storageScope = "legacy", persistEnabled = true,
   const [notes, setNotes] = useState("");
   const [completionPrompt, setCompletionPrompt] = useState(null);
   const [history, setHistory] = useState(() => {
+    if (storageScope === "guest") return [];
     try {
-      const storedHistory = JSON.parse(localStorage.getItem(POMODORO_HISTORY_KEY) || "[]");
-      const requestedSessions = localStorage.getItem(POMODORO_JULY_ADJUSTMENT_KEY) ? [] : [
+      const historyKey = scopedKey(POMODORO_HISTORY_KEY, storageScope);
+      const storedHistory = JSON.parse(localStorage.getItem(historyKey) || "[]");
+      const requestedSessions = storageScope !== "legacy" || localStorage.getItem(POMODORO_JULY_ADJUSTMENT_KEY) ? [] : [
         {
           id: "pomodoro-manual-2026-07-17-20",
           mode: "study",
@@ -312,7 +317,7 @@ function useGlobalPomodoro(data, storageScope = "legacy", persistEnabled = true,
           createdAt: "2026-07-06T18:00:00.000+02:00",
         },
       ];
-      if (!localStorage.getItem(POMODORO_JULY_22_ADJUSTMENT_KEY) && !hasJuly22PomodoroSummary(storedHistory)) {
+      if (storageScope === "legacy" && !localStorage.getItem(POMODORO_JULY_22_ADJUSTMENT_KEY) && !hasJuly22PomodoroSummary(storedHistory)) {
         requestedSessions.push(...JULY_22_POMODORO_SESSIONS);
       }
       const existingIds = new Set(storedHistory.map((session) => session.id));
@@ -539,7 +544,7 @@ function useGlobalPomodoro(data, storageScope = "legacy", persistEnabled = true,
 }
 
 function App() {
-  const [data, setData] = useState(readStoredData);
+  const [data, setData] = useState(emptyAccountData);
   const [storageReady, setStorageReady] = useState(false);
   const [localSaveStatus, setLocalSaveStatus] = useState("Cargando datos guardados");
   const [view, setView] = useState({ page: "dashboard" });
@@ -574,7 +579,7 @@ function App() {
   const markAccountDirty = () => {
     if (accountId && accountReady && !applyingRemoteRef.current) bumpDirtyVersion();
   };
-  const pomodoro = useGlobalPomodoro(data, accountId || "legacy", !accountId || accountReady, markAccountDirty);
+  const pomodoro = useGlobalPomodoro(data, accountId || "guest", accountReady, markAccountDirty);
 
   const applyAccountSnapshot = async (userId, snapshot, status) => {
     applyingRemoteRef.current = true;
@@ -608,17 +613,13 @@ function App() {
     let active = true;
     const loadAccount = async () => {
       if (!accountId) {
-        if (legacyDataRef.current) {
-          applyingRemoteRef.current = true;
-          const legacy = (await readAppData())?.data || legacyDataRef.current;
-          setData(legacy);
-          pomodoro.importSyncSnapshot(legacyPomodoroRef.current || {
-            history: JSON.parse(localStorage.getItem(POMODORO_HISTORY_KEY) || "[]"),
-            durations: JSON.parse(localStorage.getItem(POMODORO_SETTINGS_KEY) || "{}").durations,
-          });
-          window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
-        }
-        setSyncStatus("Solo en este dispositivo");
+        applyingRemoteRef.current = true;
+        const blank = emptyAccountData();
+        latestDataRef.current = blank;
+        setData(blank);
+        pomodoro.importSyncSnapshot({ history: [], durations: { study: 25, short: 5, long: 15 }, selectedSubjectId: "" });
+        setSyncStatus("Inicia sesion o crea una cuenta");
+        window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
         return;
       }
 
@@ -629,6 +630,7 @@ function App() {
       setSyncBusy(true);
       setAccountNeedsSetup(false);
       setSyncStatus(navigator.onLine ? "Cargando tu cuenta..." : "Sin conexion: abriendo copia local");
+      let isNewAccount = false;
       try {
         const local = await readAccountSnapshot(accountId);
         if (local?.data && active) {
@@ -659,8 +661,10 @@ function App() {
             applyingRemoteRef.current = true;
             setData(emptyAccountData());
             pomodoro.importSyncSnapshot({ history: [], durations: { study: 25, short: 5, long: 15 }, selectedSubjectId: "" });
-            setAccountNeedsSetup(true);
-            setSyncStatus("Cuenta nueva: elige como empezar");
+            setAccountNeedsSetup(false);
+            isNewAccount = true;
+            bumpDirtyVersion();
+            setSyncStatus("Cuenta nueva preparada");
             window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
           }
         } else if (!local?.data) {
@@ -669,7 +673,7 @@ function App() {
         }
         if (active) {
           setLoadedAccountId(accountId);
-          lastSyncedDirtyRef.current = dirtyVersionRef.current;
+          if (!isNewAccount) lastSyncedDirtyRef.current = dirtyVersionRef.current;
         }
       } catch (error) {
         console.error(error);
@@ -944,18 +948,25 @@ function App() {
     const hydrateLocalData = async () => {
       try {
         const storedRecord = await readAppData();
-        const nextData = storedRecord?.data || latestDataRef.current;
-        migrateSubjectQuestions(nextData);
-        if (!nextData.__eventsClearedV2) {
-          nextData.events = [];
-          nextData.__eventsClearedV2 = true;
+        const legacyData = storedRecord?.data || readStoredData();
+        migrateSubjectQuestions(legacyData);
+        if (!legacyData.__eventsClearedV2) {
+          legacyData.events = [];
+          legacyData.__eventsClearedV2 = true;
         }
 
-        if (!storedRecord?.data) await writeAppData(nextData);
+        if (!storedRecord?.data && localStorage.getItem(STORAGE_KEY)) await writeAppData(legacyData);
         if (!active) return;
 
-        latestDataRef.current = nextData;
-        setData(nextData);
+        legacyDataRef.current = structuredClone(legacyData);
+        legacyPomodoroRef.current = {
+          history: JSON.parse(localStorage.getItem(POMODORO_HISTORY_KEY) || "[]"),
+          durations: JSON.parse(localStorage.getItem(POMODORO_SETTINGS_KEY) || "{}").durations,
+          selectedSubjectId: JSON.parse(localStorage.getItem(POMODORO_SETTINGS_KEY) || "{}").selectedSubjectId || "",
+        };
+        const blank = emptyAccountData();
+        latestDataRef.current = blank;
+        setData(blank);
         setStorageReady(true);
         setLocalSaveStatus("Guardado en este dispositivo");
 
@@ -978,17 +989,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!storageReady || (accountId && !accountReady)) return undefined;
+    if (!storageReady || !accountId || !accountReady) return undefined;
     setLocalSaveStatus("Guardando en este dispositivo...");
     const timer = window.setTimeout(async () => {
       try {
-        if (accountId) {
-          await writeAccountSnapshot(accountId, { data, pomodoro: pomodoro.getSyncSnapshot(), revision: baseRevisionRef.current, updatedAt: baseUpdatedAtRef.current });
-        } else {
-          await writeAppData(data);
-          localStorage.removeItem(STORAGE_KEY);
-          localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
-        }
+        await writeAccountSnapshot(accountId, { data, pomodoro: pomodoro.getSyncSnapshot(), revision: baseRevisionRef.current, updatedAt: baseUpdatedAtRef.current });
         setLocalSaveStatus("Guardado en este dispositivo");
       } catch (error) {
         console.error(error);
@@ -999,12 +1004,10 @@ function App() {
   }, [data, storageReady, accountId, accountReady, pomodoro.history, pomodoro.durations, pomodoro.selectedSubjectId]);
 
   useEffect(() => {
-    if (!storageReady || (accountId && !accountReady)) return undefined;
+    if (!storageReady || !accountId || !accountReady) return undefined;
     const saveWhenHidden = () => {
       if (document.visibilityState !== "hidden") return;
-      const save = accountId
-        ? writeAccountSnapshot(accountId, { data: latestDataRef.current, pomodoro: pomodoro.getSyncSnapshot(), revision: baseRevisionRef.current, updatedAt: baseUpdatedAtRef.current })
-        : writeAppData(latestDataRef.current);
+      const save = writeAccountSnapshot(accountId, { data: latestDataRef.current, pomodoro: pomodoro.getSyncSnapshot(), revision: baseRevisionRef.current, updatedAt: baseUpdatedAtRef.current });
       save.catch((error) => console.error("Guardado al salir interrumpido", error));
     };
     document.addEventListener("visibilitychange", saveWhenHidden);
@@ -1192,9 +1195,10 @@ function App() {
         view={view}
         setView={setView}
         subjects={data.subjects}
+        canEdit={Boolean(accountId)}
         query={query}
         setQuery={setQuery}
-        openModal={setModal}
+        openModal={accountId ? setModal : () => setView({ page: "dashboard" })}
         cloudInfo={cloudInfo}
         syncStatus={syncStatus}
         syncBusy={syncBusy}
@@ -1203,7 +1207,8 @@ function App() {
         onExportBackup={exportLocalBackup}
         onImportBackup={importLocalBackup}
       >
-        {view.page === "dashboard" && (
+        {!accountId && <GuestDashboard />}
+        {accountId && view.page === "dashboard" && (
           <Dashboard
             data={data}
             stats={stats}
@@ -1214,22 +1219,22 @@ function App() {
             query={query}
           />
         )}
-        {view.page === "subjects" && (
+        {accountId && view.page === "subjects" && (
           <SubjectsPage data={data} setView={setView} openModal={setModal} updateData={updateData} query={query} />
         )}
-        {view.page === "study-map" && (
+        {accountId && view.page === "study-map" && (
           <StudyMapPage data={data} setView={setView} updateData={updateData} />
         )}
-        {view.page === "subject" && currentSubject && (
+        {accountId && view.page === "subject" && currentSubject && (
           <SubjectPage subject={currentSubject} setView={setView} openModal={setModal} updateData={updateData} />
         )}
-        {view.page === "subject-qa" && currentSubject && (
+        {accountId && view.page === "subject-qa" && currentSubject && (
           <SubjectQAPage subject={currentSubject} openModal={setModal} updateData={updateData} setView={setView} />
         )}
-        {view.page === "theme" && currentSubject && currentTheme && (
+        {accountId && view.page === "theme" && currentSubject && currentTheme && (
           <ThemePage subject={currentSubject} theme={currentTheme} openModal={setModal} updateData={updateData} setView={setView} saveStatus={localSaveStatus} />
         )}
-        {view.page === "pdf" && currentSubject && currentTheme && currentMedia && (
+        {accountId && view.page === "pdf" && currentSubject && currentTheme && currentMedia && (
           <PdfViewerPage
             subject={currentSubject}
             theme={currentTheme}
@@ -1239,16 +1244,16 @@ function App() {
             updateData={updateData}
           />
         )}
-        {view.page === "calendar" && <CalendarPage data={data} openModal={setModal} updateData={updateData} />}
-        {view.page === "schedule" && <SchedulePage data={data} openModal={setModal} updateData={updateData} />}
-        {view.page === "tasks" && <TasksPage data={data} openModal={setModal} updateData={updateData} />}
-        {view.page === "resources" && <ResourcesPage data={data} openModal={setModal} updateData={updateData} />}
-        {view.page === "pomodoro" && <PomodoroPage data={data} pomodoro={pomodoro} />}
+        {accountId && view.page === "calendar" && <CalendarPage data={data} openModal={setModal} updateData={updateData} />}
+        {accountId && view.page === "schedule" && <SchedulePage data={data} openModal={setModal} updateData={updateData} />}
+        {accountId && view.page === "tasks" && <TasksPage data={data} openModal={setModal} updateData={updateData} />}
+        {accountId && view.page === "resources" && <ResourcesPage data={data} openModal={setModal} updateData={updateData} />}
+        {accountId && view.page === "pomodoro" && <PomodoroPage data={data} pomodoro={pomodoro} />}
       </Shell>
 
-      <FloatingPomodoro pomodoro={pomodoro} setView={setView} />
-      {pomodoro.completionPrompt === "study-complete" && <PomodoroBreakPrompt pomodoro={pomodoro} />}
-      {modal && <EditorModal modal={modal} close={() => setModal(null)} data={data} updateData={updateData} />}
+      {accountId && <FloatingPomodoro pomodoro={pomodoro} setView={setView} />}
+      {accountId && pomodoro.completionPrompt === "study-complete" && <PomodoroBreakPrompt pomodoro={pomodoro} />}
+      {accountId && modal && <EditorModal modal={modal} close={() => setModal(null)} data={data} updateData={updateData} />}
     </div>
     </CloudAccountContext.Provider>
   );
@@ -1259,6 +1264,7 @@ function Shell({
   view,
   setView,
   subjects,
+  canEdit,
   query,
   setQuery,
   openModal,
@@ -1302,7 +1308,7 @@ function Shell({
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 xl:hidden">
           <button className="absolute inset-0 bg-slate-950/40" onClick={() => setMobileMenuOpen(false)} aria-label="Cerrar menu" />
-          <aside className="relative h-full w-[min(86vw,360px)] overflow-y-auto border-r border-slate-900/10 bg-white p-5 shadow-2xl">
+          <aside className="relative h-dvh w-[min(88vw,360px)] max-w-full overflow-x-hidden overflow-y-auto overscroll-contain border-r border-slate-900/10 bg-white px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] shadow-2xl sm:p-5">
             <div className="mb-4 flex justify-end">
               <IconButton icon={X} label="Cerrar menu" onClick={() => setMobileMenuOpen(false)} />
             </div>
@@ -1344,10 +1350,10 @@ function Shell({
                 placeholder="Buscar temas, tareas o recursos"
               />
             </div>
-            <QuickButton icon={Plus} label="Asignatura" onClick={() => openModal({ type: "subject" })} />
-            <QuickButton icon={ListChecks} label="Tarea" onClick={() => openModal({ type: "task" })} />
-            <QuickButton icon={LinkIcon} label="Recurso" onClick={() => openModal({ type: "resource" })} />
-            <QuickButton icon={FileText} label="Apunte" onClick={() => openModal({ type: "quick-note" })} />
+            {canEdit && <QuickButton icon={Plus} label="Asignatura" onClick={() => openModal({ type: "subject" })} />}
+            {canEdit && <QuickButton icon={ListChecks} label="Tarea" onClick={() => openModal({ type: "task" })} />}
+            {canEdit && <QuickButton icon={LinkIcon} label="Recurso" onClick={() => openModal({ type: "resource" })} />}
+            {canEdit && <QuickButton icon={FileText} label="Apunte" onClick={() => openModal({ type: "quick-note" })} />}
             <CloudSyncButton
               cloudInfo={cloudInfo}
               status={syncStatus}
@@ -1361,7 +1367,7 @@ function Shell({
         </header>
         <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">{children}</div>
       </main>
-      <div className="fixed bottom-5 right-4 z-50 md:hidden">
+      <div className="fixed bottom-5 right-4 z-40 md:hidden">
         <CloudSyncButton
           cloudInfo={cloudInfo}
           status={syncStatus}
@@ -1440,6 +1446,7 @@ function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadClo
   const [error, setError] = useState("");
   const [authMode, setAuthMode] = useState("login");
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [showPassword, setShowPassword] = useState(false);
   const user = account?.session?.user;
   const displayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Mi cuenta";
 
@@ -1474,15 +1481,20 @@ function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadClo
         {user ? displayName : "Cuenta"}
       </button>
       {open && (
-        <div className={`${mobile ? "fixed bottom-20 left-4 right-4 max-h-[75vh]" : "absolute right-0 top-12 w-96 max-h-[78vh]"} z-50 overflow-y-auto rounded-lg border border-slate-900/10 bg-white p-4 shadow-soft`}>
+        <>
+        <button type="button" onClick={() => setOpen(false)} className="fixed inset-0 z-[55] bg-slate-950/45 md:hidden" aria-label="Cerrar cuenta" />
+        <div className="fixed inset-x-3 bottom-3 top-3 z-[60] overflow-y-auto overscroll-contain rounded-lg border border-slate-900/10 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl md:absolute md:inset-auto md:right-0 md:top-12 md:z-50 md:max-h-[78vh] md:w-96 md:pb-4 md:shadow-soft">
           <div className="flex items-start gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-lg bg-[#dcebdc] text-[#1f5d55]">
               {user ? <UserRound size={19} /> : <Cloud size={19} />}
             </span>
-            <div>
+            <div className="min-w-0 flex-1">
               <h2 className="font-black">{user ? displayName : "Tu cuenta AppStudios"}</h2>
               <p className="break-all text-sm text-slate-500">{user?.email || "Sincroniza tus estudios en todos tus dispositivos"}</p>
             </div>
+            <button type="button" onClick={() => setOpen(false)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200" aria-label="Cerrar cuenta">
+              <X size={18} />
+            </button>
           </div>
 
           {!account?.configured && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm font-bold text-red-700">Falta configurar Supabase en este despliegue.</p>}
@@ -1490,19 +1502,24 @@ function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadClo
           {!user && account?.configured && (
             <form className="mt-4 space-y-3" onSubmit={submitAuth}>
               <div className="grid grid-cols-2 rounded-lg bg-slate-100 p-1 text-sm font-black">
-                <button type="button" onClick={() => setAuthMode("login")} className={`rounded-md px-3 py-2 ${authMode === "login" ? "bg-white shadow-sm" : "text-slate-500"}`}>Iniciar sesion</button>
-                <button type="button" onClick={() => setAuthMode("register")} className={`rounded-md px-3 py-2 ${authMode === "register" ? "bg-white shadow-sm" : "text-slate-500"}`}>Crear cuenta</button>
+                <button type="button" onClick={() => { setAuthMode("login"); setShowPassword(false); }} className={`rounded-md px-2 py-2 ${authMode === "login" ? "bg-white shadow-sm" : "text-slate-500"}`}>Iniciar sesión</button>
+                <button type="button" onClick={() => { setAuthMode("register"); setShowPassword(false); }} className={`rounded-md px-2 py-2 ${authMode === "register" ? "bg-white shadow-sm" : "text-slate-500"}`}>Crear cuenta</button>
               </div>
               {authMode === "register" && (
                 <label className="block text-sm font-bold text-slate-700">Nombre
-                  <input required value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:ring-4 focus:ring-emerald-100" autoComplete="name" />
+                  <input required value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-slate-900 caret-slate-900 outline-none focus:ring-4 focus:ring-emerald-100" autoComplete="name" />
                 </label>
               )}
               <label className="block text-sm font-bold text-slate-700">Correo
-                <input required type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:ring-4 focus:ring-emerald-100" autoComplete="email" />
+                <input required type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-slate-900 caret-slate-900 outline-none focus:ring-4 focus:ring-emerald-100" autoComplete="email" inputMode="email" />
               </label>
               <label className="block text-sm font-bold text-slate-700">Contraseña
-                <input required minLength={8} type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:ring-4 focus:ring-emerald-100" autoComplete={authMode === "register" ? "new-password" : "current-password"} />
+                <span className="relative mt-1 block">
+                  <input required minLength={8} type={showPassword ? "text" : "password"} value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 pr-12 text-slate-900 caret-slate-900 outline-none focus:ring-4 focus:ring-emerald-100" autoComplete={authMode === "register" ? "new-password" : "current-password"} />
+                  <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-r-lg text-slate-500 hover:bg-slate-50 hover:text-slate-800" aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"} title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>
+                    {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
+                  </button>
+                </span>
               </label>
               <button disabled={account.busy} className="flex h-11 w-full items-center justify-center rounded-lg bg-[#172033] px-4 text-sm font-black text-white disabled:opacity-60">
                 {account.busy ? "Procesando..." : authMode === "register" ? "Crear mi cuenta" : "Entrar"}
@@ -1534,7 +1551,7 @@ function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadClo
                   <RefreshCw size={16} /> {account.busy ? "Sincronizando..." : "Sincronizar ahora"}
                 </button>
               )}
-              {account.missingAttachments.length > 0 && <p className="rounded-lg bg-yellow-50 p-3 text-xs font-bold text-yellow-800">La copia de Rafael omite {account.missingAttachments.length} adjuntos antiguos, tal como se decidió. El resto de datos sí se sincroniza.</p>}
+              {account.missingAttachments.length > 0 && <p className="rounded-lg bg-yellow-50 p-3 text-xs font-bold text-yellow-800">Esta copia omite {account.missingAttachments.length} adjuntos antiguos. El resto de datos sí se sincroniza.</p>}
               {account.conflicts.length > 0 && (
                 <div className="rounded-lg border border-orange-200 p-3">
                   <p className="text-sm font-black text-orange-800">Hay {account.conflicts.length} version(es) en conflicto.</p>
@@ -1567,7 +1584,32 @@ function CloudSyncButton({ cloudInfo, status, busy, onUploadCloud, onDownloadClo
           )}
           {error && <p className="mt-3 text-sm font-bold text-red-600">{error}</p>}
         </div>
+        </>
       )}
+    </div>
+  );
+}
+
+function GuestDashboard() {
+  return (
+    <div className="space-y-5">
+      <section className="relative min-h-[430px] overflow-hidden rounded-lg bg-cover bg-[center_45%] shadow-soft" style={{ backgroundImage: "url('/appstudios-dashboard.png')" }}>
+        <div className="absolute inset-0 bg-gradient-to-r from-sky-950/20 via-sky-950/5 to-transparent" />
+        <div className="relative flex min-h-[430px] items-center p-4 sm:p-6 md:p-8">
+          <div className="w-full max-w-xl rounded-lg border border-white/40 bg-sky-950/15 p-5 text-white shadow-soft backdrop-blur-[4px] md:p-7">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-[#1f5d55] sm:text-sm">Tu espacio de estudio</p>
+            <h1 className="mt-3 text-4xl font-black leading-tight drop-shadow md:text-6xl">AppStudios</h1>
+            <div className="mt-5 h-1 w-16 rounded-full bg-emerald-300" />
+            <p className="mt-6 max-w-xl text-base font-semibold leading-relaxed md:text-xl">Crea una cuenta o inicia sesión para guardar tus asignaturas, apuntes, tareas y Pomodoro.</p>
+            <p className="mt-4 rounded-lg bg-white/85 px-4 py-3 text-sm font-black text-[#172033]">Pulsa «Cuenta» para empezar con un espacio privado y vacío.</p>
+          </div>
+        </div>
+      </section>
+      <section className="rounded-lg border border-dashed border-slate-300 bg-white/70 p-8 text-center">
+        <BookOpen className="mx-auto text-slate-300" size={32} />
+        <h2 className="mt-3 text-lg font-black text-slate-700">Todavía no hay datos</h2>
+        <p className="mt-1 text-sm font-semibold text-slate-500">Las asignaturas y sesiones aparecerán aquí después de entrar en tu cuenta.</p>
+      </section>
     </div>
   );
 }
