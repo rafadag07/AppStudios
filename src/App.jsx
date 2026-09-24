@@ -1296,6 +1296,7 @@ function Shell({
           view={view}
           setView={setView}
           subjects={subjects}
+          showAccount={false}
           cloudInfo={cloudInfo}
           syncStatus={syncStatus}
           syncBusy={syncBusy}
@@ -1320,6 +1321,7 @@ function Shell({
                 setMobileMenuOpen(false);
               }}
               subjects={subjects}
+              showAccount
               cloudInfo={cloudInfo}
               syncStatus={syncStatus}
               syncBusy={syncBusy}
@@ -1383,7 +1385,7 @@ function Shell({
   );
 }
 
-function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, syncBusy, onUploadCloud, onDownloadCloud, onExportBackup, onImportBackup }) {
+function SidebarContent({ nav, view, setView, subjects, showAccount = true, cloudInfo, syncStatus, syncBusy, onUploadCloud, onDownloadCloud, onExportBackup, onImportBackup }) {
   return (
     <>
       <button onClick={() => setView({ page: "dashboard" })} className="mb-8 flex items-center gap-3 text-left">
@@ -1409,7 +1411,7 @@ function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, s
           </button>
         ))}
       </nav>
-      <div className="mt-4">
+      {showAccount && <div className="mt-4">
         <CloudSyncButton
           cloudInfo={cloudInfo}
           status={syncStatus}
@@ -1420,7 +1422,7 @@ function SidebarContent({ nav, view, setView, subjects, cloudInfo, syncStatus, s
           onImportBackup={onImportBackup}
           full
         />
-      </div>
+      </div>}
       <div className="mt-8">
         <p className="mb-3 text-xs font-black uppercase tracking-[0.18em] text-slate-400">Asignaturas</p>
         <div className="space-y-2">
