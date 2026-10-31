@@ -63,7 +63,7 @@ import { getStoredFile, saveStoredFile } from "./data/fileStore";
 import { readAppData, writeAppData } from "./data/appStorage";
 import { readAccountSnapshot, writeAccountSnapshot } from "./data/accountStorage";
 import { findMissingLocalAttachments, hydrateCloudAssets, normalizeAssetsForCloud } from "./data/cloudAssets";
-import { hasProtectedLocalChanges } from "./data/syncSafety";
+import { canOpenOfflineAccount, hasProtectedLocalChanges } from "./data/syncSafety";
 import {
   createCloudProfile,
   deleteOwnAccount,
@@ -641,9 +641,10 @@ function App() {
       setSyncStatus(navigator.onLine ? "Cargando tu cuenta..." : "Sin conexion: abriendo copia local");
       let isNewAccount = false;
       let hasPendingLocal = false;
+      let local = null;
       try {
-        const local = await readAccountSnapshot(accountId);
-        if (local?.data && active) {
+        local = await readAccountSnapshot(accountId);
+        if (canOpenOfflineAccount(local) && active) {
           applyingRemoteRef.current = true;
           setData(local.data);
           pomodoro.importSyncSnapshot(local.pomodoro);
@@ -703,7 +704,14 @@ function App() {
         }
       } catch (error) {
         console.error(error);
-        setSyncStatus(`No se ha podido abrir la cuenta: ${error.message}`);
+        if (local?.data && active) {
+          setLoadedAccountId(accountId);
+          if (hasPendingLocal) queuePendingSync();
+          else lastSyncedDirtyRef.current = dirtyVersionRef.current;
+          setSyncStatus("Nube temporalmente no disponible: trabajando con la copia segura de este dispositivo");
+        } else {
+          setSyncStatus(`No se ha podido abrir la cuenta: ${error.message}`);
+        }
       } finally {
         if (active) setSyncBusy(false);
       }

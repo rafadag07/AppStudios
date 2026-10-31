@@ -8,3 +8,7 @@ export function hasProtectedLocalChanges(snapshot) {
 export function shouldKeepLocalOnOpen(snapshot) {
   return hasProtectedLocalChanges(snapshot);
 }
+
+export function canOpenOfflineAccount(snapshot) {
+  return Boolean(snapshot?.data);
+}

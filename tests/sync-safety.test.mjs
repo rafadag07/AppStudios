@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasProtectedLocalChanges, shouldKeepLocalOnOpen } from "../src/data/syncSafety.js";
+import { canOpenOfflineAccount, hasProtectedLocalChanges, shouldKeepLocalOnOpen } from "../src/data/syncSafety.js";
 
 test("una copia local pendiente tiene prioridad al volver a abrir", () => {
   const snapshot = { data: { subjects: [{ id: "local" }] }, pendingSync: true };
@@ -21,4 +21,9 @@ test("la nube solo puede aplicarse si la copia local confirma estar sincronizada
 test("un registro sin datos no bloquea la primera descarga", () => {
   assert.equal(hasProtectedLocalChanges({ pendingSync: true }), false);
   assert.equal(hasProtectedLocalChanges(null), false);
+});
+
+test("una pausa de Supabase no impide abrir la copia local existente", () => {
+  assert.equal(canOpenOfflineAccount({ data: { subjects: [{ id: "offline" }] } }), true);
+  assert.equal(canOpenOfflineAccount({}), false);
 });
