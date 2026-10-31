@@ -3174,6 +3174,9 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const editorRef = useRef(null);
   const editorFrameRef = useRef(null);
   const fileInputRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  const saveTimerRef = useRef(null);
+  const savePendingRef = useRef(false);
   const savedRangeRef = useRef(null);
   const draggingImageRef = useRef(null);
   const [selectedImage, setSelectedImage] = useState(null);
@@ -3188,6 +3191,10 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
     if (!editorRef.current) return;
     editorRef.current.innerHTML = value || emptyThemeDocument();
     normalizeEditableBlocks(editorRef.current);
@@ -3199,18 +3206,54 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
   }, []);
 
   const saveDocument = () => {
+    window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
     normalizeEditableBlocks(editorRef.current);
     prepareEditorTables();
     prepareEditorImages();
     refreshToc();
     ensureEditableParagraph(editorRef.current);
     highlightCodeBlocks(editorRef.current);
-    onChange(serializeEditorHtml(editorRef.current));
+    onChangeRef.current(serializeEditorHtml(editorRef.current));
+    savePendingRef.current = false;
   };
 
   const saveDocumentLight = () => {
-    onChange(serializeEditorHtml(editorRef.current));
+    if (!editorRef.current) return;
+    window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    onChangeRef.current(serializeEditorHtml(editorRef.current));
+    savePendingRef.current = false;
   };
+
+  const scheduleDocumentSave = () => {
+    savePendingRef.current = true;
+    window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      saveDocumentLight();
+    }, 400);
+  };
+
+  useEffect(() => {
+    const flushPendingSave = () => {
+      if (!savePendingRef.current) return;
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      saveDocumentLight();
+    };
+    const saveWhenHidden = (event) => {
+      if (event?.type === "visibilitychange" && document.visibilityState !== "hidden") return;
+      flushPendingSave();
+    };
+    document.addEventListener("visibilitychange", saveWhenHidden);
+    window.addEventListener("pagehide", saveWhenHidden);
+    return () => {
+      document.removeEventListener("visibilitychange", saveWhenHidden);
+      window.removeEventListener("pagehide", saveWhenHidden);
+      flushPendingSave();
+    };
+  }, []);
 
   const refreshToc = () => {
     if (!editorRef.current) return;
@@ -3600,8 +3643,11 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
 
   const handleEditorBlur = (event) => {
     const codeContent = event.target?.closest?.(".study-code-content");
-    if (!codeContent || !editorRef.current?.contains(codeContent)) return;
-    highlightCodeElement(codeContent, { preserveSelection: false });
+    if (codeContent && editorRef.current?.contains(codeContent)) {
+      highlightCodeElement(codeContent, { preserveSelection: false });
+    }
+    window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
     saveDocumentLight();
   };
 
@@ -4111,13 +4157,12 @@ function RichTextEditor({ value, onChange, onCreateQuestion }) {
           onInput={(event) => {
             const codeContent = event.target?.closest?.(".study-code-content");
             if (codeContent && editorRef.current?.contains(codeContent)) {
-              highlightCodeElement(codeContent, { preserveSelection: true });
               saveSelection();
-              saveDocumentLight();
+              scheduleDocumentSave();
               return;
             }
             saveSelection();
-            saveDocument();
+            scheduleDocumentSave();
           }}
           onClick={handleEditorClick}
           onFocus={handleEditorFocus}
