@@ -63,7 +63,12 @@ import { getStoredFile, saveStoredFile } from "./data/fileStore";
 import { readAppData, writeAppData } from "./data/appStorage";
 import { readAccountSnapshot, writeAccountSnapshot } from "./data/accountStorage";
 import { findMissingLocalAttachments, hydrateCloudAssets, normalizeAssetsForCloud } from "./data/cloudAssets";
-import { canOpenOfflineAccount, hasProtectedLocalChanges, shouldResetAccountForSessionChange } from "./data/syncSafety";
+import {
+  canOpenOfflineAccount,
+  hasProtectedLocalChanges,
+  preserveConflictVersions,
+  shouldResetAccountForSessionChange,
+} from "./data/syncSafety";
 import {
   createCloudProfile,
   deleteOwnAccount,
@@ -774,6 +779,7 @@ function App() {
         }
         const versionPath = await uploadVersionSnapshot(accountId, current.revision, { data: current.state, pomodoro: current.pomodoro });
         const revision = crypto.randomUUID();
+        const preservedConflictHistory = preserveConflictVersions(current.history || [], current.conflicts || []);
         const envelope = {
           ...current,
           revision,
@@ -781,7 +787,7 @@ function App() {
           deviceId: getDeviceId(),
           state: normalized.data,
           pomodoro: pomodoroSnapshot,
-          history: [{ revision: current.revision, path: versionPath, updatedAt: current.updatedAt || row.updated_at, deviceId: current.deviceId }, ...(current.history || [])].slice(0, 20),
+          history: [{ revision: current.revision, path: versionPath, updatedAt: current.updatedAt || row.updated_at, deviceId: current.deviceId }, ...preservedConflictHistory].slice(0, 20),
           conflicts: force ? [] : (current.conflicts || []),
           missingAttachments: missing,
           omittedAttachments: current.omittedAttachments || [],
@@ -1220,13 +1226,25 @@ function App() {
   };
 
   const useCloudAfterConflict = async () => {
-    const row = await fetchCloudData(accountId);
+    let row = await fetchCloudData(accountId);
     if (!row?.data?.state) return;
+    if ((row.data.conflicts || []).length > 0) {
+      const resolvedEnvelope = {
+        ...row.data,
+        history: preserveConflictVersions(row.data.history || [], row.data.conflicts || []),
+        conflicts: [],
+      };
+      const saved = await updateCloudProfile(accountId, row.updated_at, resolvedEnvelope);
+      if (!saved) throw new Error("La nube cambio mientras se resolvia el conflicto. Prueba otra vez.");
+      row = saved;
+    }
     conflictBlockedRef.current = false;
     pendingSyncRef.current = false;
     await applyAccountSnapshot(accountId, { data: row.data.state, pomodoro: row.data.pomodoro, revision: row.data.revision, updatedAt: row.updated_at, missingAttachments: row.data.missingAttachments, omittedAttachments: row.data.omittedAttachments }, "Version de la nube aplicada");
     baseRevisionRef.current = row.data.revision;
     baseUpdatedAtRef.current = row.updated_at;
+    setCloudHistory(row.data.history || []);
+    setCloudConflicts([]);
     lastSyncedDirtyRef.current = dirtyVersionRef.current;
   };
 

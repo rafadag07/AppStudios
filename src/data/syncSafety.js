@@ -16,3 +16,16 @@ export function canOpenOfflineAccount(snapshot) {
 export function shouldResetAccountForSessionChange(currentUserId, nextUserId) {
   return (currentUserId || null) !== (nextUserId || null);
 }
+
+export function preserveConflictVersions(history = [], conflicts = []) {
+  const recovered = conflicts.map((conflict) => ({
+    revision: conflict.revision,
+    path: conflict.path,
+    updatedAt: conflict.createdAt,
+    deviceId: conflict.deviceId,
+  }));
+  const seen = new Set();
+  return [...recovered, ...history]
+    .filter((version) => version?.revision && version?.path && !seen.has(version.revision) && seen.add(version.revision))
+    .slice(0, 20);
+}

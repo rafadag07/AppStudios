@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   canOpenOfflineAccount,
   hasProtectedLocalChanges,
+  preserveConflictVersions,
   shouldKeepLocalOnOpen,
   shouldResetAccountForSessionChange,
 } from "../src/data/syncSafety.js";
@@ -37,4 +38,11 @@ test("renovar el token del mismo usuario no reinicia la cuenta", () => {
   assert.equal(shouldResetAccountForSessionChange("rafa", "rafa"), false);
   assert.equal(shouldResetAccountForSessionChange("rafa", "otro"), true);
   assert.equal(shouldResetAccountForSessionChange("rafa", null), true);
+});
+
+test("resolver un conflicto conserva las versiones en el historial sin duplicarlas", () => {
+  const conflict = { revision: "local-2", path: "u/versions/local-2.json", createdAt: "2026-10-31T12:00:00Z", deviceId: "movil" };
+  const history = [{ revision: "old-1", path: "u/versions/old-1.json", updatedAt: "2026-10-30T12:00:00Z", deviceId: "pc" }];
+  const result = preserveConflictVersions(history, [conflict, conflict]);
+  assert.deepEqual(result.map((version) => version.revision), ["local-2", "old-1"]);
 });
