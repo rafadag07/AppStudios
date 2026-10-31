@@ -63,6 +63,7 @@ import { getStoredFile, saveStoredFile } from "./data/fileStore";
 import { readAppData, writeAppData } from "./data/appStorage";
 import { readAccountSnapshot, writeAccountSnapshot } from "./data/accountStorage";
 import { findMissingLocalAttachments, hydrateCloudAssets, normalizeAssetsForCloud } from "./data/cloudAssets";
+import { hasProtectedLocalChanges } from "./data/syncSafety";
 import {
   createCloudProfile,
   deleteOwnAccount,
@@ -569,6 +570,8 @@ function App() {
   const applyingRemoteRef = useRef(false);
   const syncInFlightRef = useRef(false);
   const lastSyncedDirtyRef = useRef(0);
+  const pendingSyncRef = useRef(false);
+  const conflictBlockedRef = useRef(false);
   const accountId = session?.user?.id || null;
   const accountReady = Boolean(accountId && loadedAccountId === accountId);
   const bumpDirtyVersion = () => setDirtyVersion((value) => {
@@ -576,8 +579,12 @@ function App() {
     dirtyVersionRef.current = next;
     return next;
   });
+  const queuePendingSync = () => {
+    pendingSyncRef.current = true;
+    bumpDirtyVersion();
+  };
   const markAccountDirty = () => {
-    if (accountId && accountReady && !applyingRemoteRef.current) bumpDirtyVersion();
+    if (accountId && accountReady && !applyingRemoteRef.current) queuePendingSync();
   };
   const pomodoro = useGlobalPomodoro(data, accountId || "guest", accountReady, markAccountDirty);
 
@@ -591,7 +598,9 @@ function App() {
       pomodoro.importSyncSnapshot(snapshot.pomodoro || { history: [], durations: { study: 25, short: 5, long: 15 } });
       setMissingAttachments([...(snapshot.missingAttachments || findMissingLocalAttachments(nextData)), ...(snapshot.omittedAttachments || [])]);
       setSyncStatus(status);
-      await writeAccountSnapshot(userId, { data: nextData, pomodoro: snapshot.pomodoro, revision: snapshot.revision, updatedAt: snapshot.updatedAt });
+      pendingSyncRef.current = false;
+      conflictBlockedRef.current = false;
+      await writeAccountSnapshot(userId, { data: nextData, pomodoro: snapshot.pomodoro, revision: snapshot.revision, updatedAt: snapshot.updatedAt, pendingSync: false, conflictBlocked: false });
     } finally {
       window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
     }
@@ -631,6 +640,7 @@ function App() {
       setAccountNeedsSetup(false);
       setSyncStatus(navigator.onLine ? "Cargando tu cuenta..." : "Sin conexion: abriendo copia local");
       let isNewAccount = false;
+      let hasPendingLocal = false;
       try {
         const local = await readAccountSnapshot(accountId);
         if (local?.data && active) {
@@ -638,42 +648,58 @@ function App() {
           setData(local.data);
           pomodoro.importSyncSnapshot(local.pomodoro);
           baseRevisionRef.current = local.revision || null;
+          baseUpdatedAtRef.current = local.updatedAt || null;
+          // Snapshots created before this protection existed are treated as pending
+          // once, so an older cloud copy can never silently replace them.
+          hasPendingLocal = hasProtectedLocalChanges(local);
+          pendingSyncRef.current = hasPendingLocal;
+          conflictBlockedRef.current = Boolean(local.conflictBlocked);
           window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
         }
         if (navigator.onLine) {
           const row = await fetchCloudData(accountId);
           if (row?.data?.state || row?.data?.subjects) {
             const envelope = row.data.state ? row.data : { revision: `legacy-${row.updated_at}`, updatedAt: row.updated_at, state: row.data, pomodoro: null, history: [] };
-            await applyAccountSnapshot(accountId, {
-              data: envelope.state,
-              pomodoro: envelope.pomodoro,
-              revision: envelope.revision,
-              updatedAt: row.updated_at,
-              missingAttachments: envelope.missingAttachments,
-              omittedAttachments: envelope.omittedAttachments,
-            }, "Sincronizado");
-            baseRevisionRef.current = envelope.revision;
-            baseUpdatedAtRef.current = row.updated_at;
             setCloudHistory(envelope.history || []);
             setCloudConflicts(envelope.conflicts || []);
             setCloudInfo({ updatedAt: row.updated_at });
+            if (hasPendingLocal) {
+              setSyncStatus(conflictBlockedRef.current
+                ? "Hay dos versiones conservadas. Elige cual mantener."
+                : "Cambios locales protegidos; pendientes de sincronizar");
+              queuePendingSync();
+            } else {
+              await applyAccountSnapshot(accountId, {
+                data: envelope.state,
+                pomodoro: envelope.pomodoro,
+                revision: envelope.revision,
+                updatedAt: row.updated_at,
+                missingAttachments: envelope.missingAttachments,
+                omittedAttachments: envelope.omittedAttachments,
+              }, "Sincronizado");
+              baseRevisionRef.current = envelope.revision;
+              baseUpdatedAtRef.current = row.updated_at;
+            }
           } else if (!local?.data) {
             applyingRemoteRef.current = true;
             setData(emptyAccountData());
             pomodoro.importSyncSnapshot({ history: [], durations: { study: 25, short: 5, long: 15 }, selectedSubjectId: "" });
             setAccountNeedsSetup(false);
             isNewAccount = true;
-            bumpDirtyVersion();
+            queuePendingSync();
             setSyncStatus("Cuenta nueva preparada");
             window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
           }
+        } else if (hasPendingLocal) {
+          queuePendingSync();
+          setSyncStatus("Sin conexion: cambios guardados y pendientes de sincronizar");
         } else if (!local?.data) {
           setData(emptyAccountData());
           setSyncStatus("Esta cuenta necesita conectarse por primera vez");
         }
         if (active) {
           setLoadedAccountId(accountId);
-          if (!isNewAccount) lastSyncedDirtyRef.current = dirtyVersionRef.current;
+          if (!isNewAccount && !hasPendingLocal) lastSyncedDirtyRef.current = dirtyVersionRef.current;
         }
       } catch (error) {
         console.error(error);
@@ -693,12 +719,22 @@ function App() {
     const next = { ...row.data, conflicts: [...(row.data.conflicts || []), conflict] };
     const saved = await updateCloudProfile(accountId, row.updated_at, next);
     if (!saved) throw new Error("La nube cambio mientras se guardaba el conflicto. Se reintentara.");
+    conflictBlockedRef.current = true;
+    pendingSyncRef.current = true;
     setCloudConflicts(next.conflicts);
     setSyncStatus("Hay dos versiones. Se han conservado las dos para revisarlas.");
+    await writeAccountSnapshot(accountId, {
+      data: latestDataRef.current,
+      pomodoro: pomodoroSnapshot,
+      revision: baseRevisionRef.current,
+      updatedAt: baseUpdatedAtRef.current,
+      pendingSync: true,
+      conflictBlocked: true,
+    });
   };
 
   const syncAccountNow = async ({ force = false } = {}) => {
-    if (!accountReady || accountNeedsSetup || !navigator.onLine || syncInFlightRef.current) return;
+    if (!accountReady || accountNeedsSetup || !navigator.onLine || syncInFlightRef.current || (conflictBlockedRef.current && !force)) return;
     syncInFlightRef.current = true;
     const syncingVersion = dirtyVersionRef.current;
     let completed = false;
@@ -715,7 +751,7 @@ function App() {
         row = await createCloudProfile(accountId, envelope);
       } else {
         const current = row.data?.state ? row.data : { format: "appstudios-cloud-v3", revision: `legacy-${row.updated_at}`, updatedAt: row.updated_at, deviceId: "legacy", state: row.data, pomodoro: null, history: [], conflicts: [] };
-        if (!force && baseRevisionRef.current && current.revision !== baseRevisionRef.current) {
+        if (!force && current.revision !== baseRevisionRef.current) {
           await recordConflict(row, normalized.data, pomodoroSnapshot);
           return;
         }
@@ -749,8 +785,10 @@ function App() {
       setCloudInfo({ updatedAt: row.updated_at });
       setSyncStatus("Sincronizado");
       lastSyncedDirtyRef.current = syncingVersion;
+      pendingSyncRef.current = false;
+      conflictBlockedRef.current = false;
       completed = true;
-      await writeAccountSnapshot(accountId, { data: latestDataRef.current, pomodoro: pomodoroSnapshot, revision: row.data.revision, updatedAt: row.updated_at });
+      await writeAccountSnapshot(accountId, { data: latestDataRef.current, pomodoro: pomodoroSnapshot, revision: row.data.revision, updatedAt: row.updated_at, pendingSync: false, conflictBlocked: false });
     } catch (error) {
       console.error(error);
       setSyncStatus(`Pendiente de sincronizar: ${error.message}`);
@@ -839,7 +877,7 @@ function App() {
     migrateSubjectQuestions(importedData);
     setData(importedData);
     if (importedPomodoro) pomodoro.importSyncSnapshot(importedPomodoro);
-    if (accountReady) bumpDirtyVersion();
+    if (accountReady) queuePendingSync();
     localStorage.setItem(LOCAL_DATA_UPDATED_KEY, new Date().toISOString());
     setSyncStatus(importedPomodoro ? `${status} (incluye Pomodoro)` : status);
   };
@@ -993,25 +1031,43 @@ function App() {
     setLocalSaveStatus("Guardando en este dispositivo...");
     const timer = window.setTimeout(async () => {
       try {
-        await writeAccountSnapshot(accountId, { data, pomodoro: pomodoro.getSyncSnapshot(), revision: baseRevisionRef.current, updatedAt: baseUpdatedAtRef.current });
+        await writeAccountSnapshot(accountId, {
+          data,
+          pomodoro: pomodoro.getSyncSnapshot(),
+          revision: baseRevisionRef.current,
+          updatedAt: baseUpdatedAtRef.current,
+          pendingSync: pendingSyncRef.current,
+          conflictBlocked: conflictBlockedRef.current,
+        });
         setLocalSaveStatus("Guardado en este dispositivo");
       } catch (error) {
         console.error(error);
         setLocalSaveStatus("No se ha podido guardar: descarga una copia");
       }
-    }, 450);
+    }, 250);
     return () => window.clearTimeout(timer);
   }, [data, storageReady, accountId, accountReady, pomodoro.history, pomodoro.durations, pomodoro.selectedSubjectId]);
 
   useEffect(() => {
     if (!storageReady || !accountId || !accountReady) return undefined;
-    const saveWhenHidden = () => {
-      if (document.visibilityState !== "hidden") return;
-      const save = writeAccountSnapshot(accountId, { data: latestDataRef.current, pomodoro: pomodoro.getSyncSnapshot(), revision: baseRevisionRef.current, updatedAt: baseUpdatedAtRef.current });
+    const saveWhenHidden = (event) => {
+      if (event?.type === "visibilitychange" && document.visibilityState !== "hidden") return;
+      const save = writeAccountSnapshot(accountId, {
+        data: latestDataRef.current,
+        pomodoro: pomodoro.getSyncSnapshot(),
+        revision: baseRevisionRef.current,
+        updatedAt: baseUpdatedAtRef.current,
+        pendingSync: pendingSyncRef.current,
+        conflictBlocked: conflictBlockedRef.current,
+      });
       save.catch((error) => console.error("Guardado al salir interrumpido", error));
     };
     document.addEventListener("visibilitychange", saveWhenHidden);
-    return () => document.removeEventListener("visibilitychange", saveWhenHidden);
+    window.addEventListener("pagehide", saveWhenHidden);
+    return () => {
+      document.removeEventListener("visibilitychange", saveWhenHidden);
+      window.removeEventListener("pagehide", saveWhenHidden);
+    };
   }, [storageReady, accountId, accountReady]);
 
   useEffect(() => {
@@ -1121,7 +1177,7 @@ function App() {
     setLoadedAccountId(accountId);
     setMissingAttachments(findMissingLocalAttachments(next));
     applyingRemoteRef.current = false;
-    bumpDirtyVersion();
+    queuePendingSync();
   };
 
   const startEmptyAccount = () => {
@@ -1131,7 +1187,7 @@ function App() {
     setAccountNeedsSetup(false);
     setLoadedAccountId(accountId);
     applyingRemoteRef.current = false;
-    bumpDirtyVersion();
+    queuePendingSync();
   };
 
   const restoreCloudVersion = async (version) => {
@@ -1140,7 +1196,7 @@ function App() {
     try {
       const snapshot = await downloadVersionSnapshot(version.path);
       await applyAccountSnapshot(accountId, { ...snapshot, revision: version.revision, updatedAt: version.updatedAt }, "Version recuperada; guardando como nueva version...");
-      bumpDirtyVersion();
+      queuePendingSync();
     } finally {
       setSyncBusy(false);
     }
@@ -1149,6 +1205,8 @@ function App() {
   const useCloudAfterConflict = async () => {
     const row = await fetchCloudData(accountId);
     if (!row?.data?.state) return;
+    conflictBlockedRef.current = false;
+    pendingSyncRef.current = false;
     await applyAccountSnapshot(accountId, { data: row.data.state, pomodoro: row.data.pomodoro, revision: row.data.revision, updatedAt: row.updated_at, missingAttachments: row.data.missingAttachments, omittedAttachments: row.data.omittedAttachments }, "Version de la nube aplicada");
     baseRevisionRef.current = row.data.revision;
     baseUpdatedAtRef.current = row.updated_at;
@@ -1183,7 +1241,11 @@ function App() {
     startWithLocalData: startAccountWithLocalData,
     startEmpty: startEmptyAccount,
     restoreVersion: restoreCloudVersion,
-    keepLocalConflict: () => syncAccountNow({ force: true }),
+    keepLocalConflict: () => {
+      conflictBlockedRef.current = false;
+      pendingSyncRef.current = true;
+      return syncAccountNow({ force: true });
+    },
     useCloudAfterConflict,
     exportBackup: exportLocalBackup,
   };
@@ -1195,7 +1257,7 @@ function App() {
         view={view}
         setView={setView}
         subjects={data.subjects}
-        canEdit={Boolean(accountId)}
+        canEdit={Boolean(accountId && accountReady)}
         query={query}
         setQuery={setQuery}
         openModal={accountId ? setModal : () => setView({ page: "dashboard" })}
@@ -1208,7 +1270,15 @@ function App() {
         onImportBackup={importLocalBackup}
       >
         {!accountId && <GuestDashboard />}
-        {accountId && view.page === "dashboard" && (
+        {accountId && !accountReady && (
+          <section className="rounded-lg border border-slate-900/10 bg-white p-8 text-center shadow-soft">
+            <RefreshCw className="mx-auto animate-spin text-[#2f6f73]" size={28} />
+            <h1 className="mt-4 text-xl font-black">Abriendo tu espacio seguro</h1>
+            <p className="mt-2 font-semibold text-slate-500">{syncStatus}</p>
+            <p className="mt-3 text-sm text-slate-500">La edicion se habilitara cuando la copia local este protegida.</p>
+          </section>
+        )}
+        {accountId && accountReady && view.page === "dashboard" && (
           <Dashboard
             data={data}
             stats={stats}
@@ -1219,22 +1289,22 @@ function App() {
             query={query}
           />
         )}
-        {accountId && view.page === "subjects" && (
+        {accountId && accountReady && view.page === "subjects" && (
           <SubjectsPage data={data} setView={setView} openModal={setModal} updateData={updateData} query={query} />
         )}
-        {accountId && view.page === "study-map" && (
+        {accountId && accountReady && view.page === "study-map" && (
           <StudyMapPage data={data} setView={setView} updateData={updateData} />
         )}
-        {accountId && view.page === "subject" && currentSubject && (
+        {accountId && accountReady && view.page === "subject" && currentSubject && (
           <SubjectPage subject={currentSubject} setView={setView} openModal={setModal} updateData={updateData} />
         )}
-        {accountId && view.page === "subject-qa" && currentSubject && (
+        {accountId && accountReady && view.page === "subject-qa" && currentSubject && (
           <SubjectQAPage subject={currentSubject} openModal={setModal} updateData={updateData} setView={setView} />
         )}
-        {accountId && view.page === "theme" && currentSubject && currentTheme && (
+        {accountId && accountReady && view.page === "theme" && currentSubject && currentTheme && (
           <ThemePage subject={currentSubject} theme={currentTheme} openModal={setModal} updateData={updateData} setView={setView} saveStatus={localSaveStatus} />
         )}
-        {accountId && view.page === "pdf" && currentSubject && currentTheme && currentMedia && (
+        {accountId && accountReady && view.page === "pdf" && currentSubject && currentTheme && currentMedia && (
           <PdfViewerPage
             subject={currentSubject}
             theme={currentTheme}
@@ -1244,16 +1314,16 @@ function App() {
             updateData={updateData}
           />
         )}
-        {accountId && view.page === "calendar" && <CalendarPage data={data} openModal={setModal} updateData={updateData} />}
-        {accountId && view.page === "schedule" && <SchedulePage data={data} openModal={setModal} updateData={updateData} />}
-        {accountId && view.page === "tasks" && <TasksPage data={data} openModal={setModal} updateData={updateData} />}
-        {accountId && view.page === "resources" && <ResourcesPage data={data} openModal={setModal} updateData={updateData} />}
-        {accountId && view.page === "pomodoro" && <PomodoroPage data={data} pomodoro={pomodoro} />}
+        {accountId && accountReady && view.page === "calendar" && <CalendarPage data={data} openModal={setModal} updateData={updateData} />}
+        {accountId && accountReady && view.page === "schedule" && <SchedulePage data={data} openModal={setModal} updateData={updateData} />}
+        {accountId && accountReady && view.page === "tasks" && <TasksPage data={data} openModal={setModal} updateData={updateData} />}
+        {accountId && accountReady && view.page === "resources" && <ResourcesPage data={data} openModal={setModal} updateData={updateData} />}
+        {accountId && accountReady && view.page === "pomodoro" && <PomodoroPage data={data} pomodoro={pomodoro} />}
       </Shell>
 
-      {accountId && <FloatingPomodoro pomodoro={pomodoro} setView={setView} />}
-      {accountId && pomodoro.completionPrompt === "study-complete" && <PomodoroBreakPrompt pomodoro={pomodoro} />}
-      {accountId && modal && <EditorModal modal={modal} close={() => setModal(null)} data={data} updateData={updateData} />}
+      {accountId && accountReady && <FloatingPomodoro pomodoro={pomodoro} setView={setView} />}
+      {accountId && accountReady && pomodoro.completionPrompt === "study-complete" && <PomodoroBreakPrompt pomodoro={pomodoro} />}
+      {accountId && accountReady && modal && <EditorModal modal={modal} close={() => setModal(null)} data={data} updateData={updateData} />}
     </div>
     </CloudAccountContext.Provider>
   );
