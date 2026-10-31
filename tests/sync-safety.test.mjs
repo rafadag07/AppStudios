@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canOpenOfflineAccount, hasProtectedLocalChanges, shouldKeepLocalOnOpen } from "../src/data/syncSafety.js";
+import {
+  canOpenOfflineAccount,
+  hasProtectedLocalChanges,
+  shouldKeepLocalOnOpen,
+  shouldResetAccountForSessionChange,
+} from "../src/data/syncSafety.js";
 
 test("una copia local pendiente tiene prioridad al volver a abrir", () => {
   const snapshot = { data: { subjects: [{ id: "local" }] }, pendingSync: true };
@@ -26,4 +31,10 @@ test("un registro sin datos no bloquea la primera descarga", () => {
 test("una pausa de Supabase no impide abrir la copia local existente", () => {
   assert.equal(canOpenOfflineAccount({ data: { subjects: [{ id: "offline" }] } }), true);
   assert.equal(canOpenOfflineAccount({}), false);
+});
+
+test("renovar el token del mismo usuario no reinicia la cuenta", () => {
+  assert.equal(shouldResetAccountForSessionChange("rafa", "rafa"), false);
+  assert.equal(shouldResetAccountForSessionChange("rafa", "otro"), true);
+  assert.equal(shouldResetAccountForSessionChange("rafa", null), true);
 });

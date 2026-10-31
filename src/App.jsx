@@ -63,7 +63,7 @@ import { getStoredFile, saveStoredFile } from "./data/fileStore";
 import { readAppData, writeAppData } from "./data/appStorage";
 import { readAccountSnapshot, writeAccountSnapshot } from "./data/accountStorage";
 import { findMissingLocalAttachments, hydrateCloudAssets, normalizeAssetsForCloud } from "./data/cloudAssets";
-import { canOpenOfflineAccount, hasProtectedLocalChanges } from "./data/syncSafety";
+import { canOpenOfflineAccount, hasProtectedLocalChanges, shouldResetAccountForSessionChange } from "./data/syncSafety";
 import {
   createCloudProfile,
   deleteOwnAccount,
@@ -562,6 +562,7 @@ function App() {
   const [missingAttachments, setMissingAttachments] = useState([]);
   const [dirtyVersion, setDirtyVersion] = useState(0);
   const dirtyVersionRef = useRef(0);
+  const sessionUserIdRef = useRef(null);
   const latestDataRef = useRef(data);
   const legacyDataRef = useRef(null);
   const legacyPomodoroRef = useRef(null);
@@ -609,9 +610,17 @@ function App() {
   useEffect(() => {
     if (!isSupabaseConfigured) return undefined;
     let active = true;
-    getCurrentSession().then((current) => { if (active) setSession(current); }).catch((error) => setSyncStatus(error.message));
+    getCurrentSession().then((current) => {
+      if (!active) return;
+      sessionUserIdRef.current = current?.user?.id || null;
+      setSession(current);
+    }).catch((error) => setSyncStatus(error.message));
     const unsubscribe = onCloudAuthChange((nextSession) => {
-      setLoadedAccountId(null);
+      const nextUserId = nextSession?.user?.id || null;
+      // Supabase emits TOKEN_REFRESHED while the same user is working. That
+      // event must not reopen the account or interrupt local persistence.
+      if (shouldResetAccountForSessionChange(sessionUserIdRef.current, nextUserId)) setLoadedAccountId(null);
+      sessionUserIdRef.current = nextUserId;
       setSession(nextSession);
     });
     return () => { active = false; unsubscribe(); };

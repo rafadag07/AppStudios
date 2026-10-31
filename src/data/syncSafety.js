@@ -12,3 +12,7 @@ export function shouldKeepLocalOnOpen(snapshot) {
 export function canOpenOfflineAccount(snapshot) {
   return Boolean(snapshot?.data);
 }
+
+export function shouldResetAccountForSessionChange(currentUserId, nextUserId) {
+  return (currentUserId || null) !== (nextUserId || null);
+}
