@@ -1095,7 +1095,7 @@ function App() {
 
   useEffect(() => {
     if (!accountReady || accountNeedsSetup || dirtyVersion === lastSyncedDirtyRef.current) return undefined;
-    const timer = window.setTimeout(() => syncAccountNow(), 1200);
+    const timer = window.setTimeout(() => syncAccountNow(), 5000);
     return () => window.clearTimeout(timer);
   }, [dirtyVersion, accountReady, accountNeedsSetup]);
 
@@ -1253,6 +1253,17 @@ function App() {
     markAccountDirty();
   };
 
+  const updateThemeDocument = (subjectId, themeId, documentHtml) => {
+    setData((current) => ({
+      ...current,
+      subjects: current.subjects.map((subject) => subject.id !== subjectId ? subject : {
+        ...subject,
+        themes: subject.themes.map((theme) => theme.id !== themeId ? theme : { ...theme, documentHtml }),
+      }),
+    }));
+    markAccountDirty();
+  };
+
   const currentSubject = view.subjectId ? data.subjects.find((subject) => subject.id === view.subjectId) : null;
   const currentTheme = currentSubject?.themes.find((theme) => theme.id === view.themeId);
   const currentMedia = currentTheme?.media?.find((file) => file.id === view.mediaId);
@@ -1337,7 +1348,7 @@ function App() {
           <SubjectQAPage subject={currentSubject} openModal={setModal} updateData={updateData} setView={setView} />
         )}
         {accountId && accountReady && view.page === "theme" && currentSubject && currentTheme && (
-          <ThemePage subject={currentSubject} theme={currentTheme} openModal={setModal} updateData={updateData} setView={setView} saveStatus={localSaveStatus} />
+          <ThemePage subject={currentSubject} theme={currentTheme} openModal={setModal} updateData={updateData} updateThemeDocument={updateThemeDocument} setView={setView} saveStatus={localSaveStatus} />
         )}
         {accountId && accountReady && view.page === "pdf" && currentSubject && currentTheme && currentMedia && (
           <PdfViewerPage
@@ -2315,7 +2326,7 @@ function SubjectPage({ subject, setView, openModal, updateData }) {
   );
 }
 
-function ThemePage({ subject, theme, openModal, updateData, setView, saveStatus }) {
+function ThemePage({ subject, theme, openModal, updateData, updateThemeDocument, setView, saveStatus }) {
   const fileInputRef = useRef(null);
   const [savedAt, setSavedAt] = useState(null);
   const [previewFile, setPreviewFile] = useState(null);
@@ -2336,11 +2347,7 @@ function ThemePage({ subject, theme, openModal, updateData, setView, saveStatus 
   };
 
   const updateDocument = (html) => {
-    updateData((draft) => {
-      const target = findTheme(draft, subject.id, theme.id);
-      target.documentHtml = html;
-      return draft;
-    });
+    updateThemeDocument(subject.id, theme.id, html);
     setSavedAt(new Date());
   };
 

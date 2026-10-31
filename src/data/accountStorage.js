@@ -36,7 +36,9 @@ export async function writeAccountSnapshot(userId, snapshot) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(SNAPSHOTS, "readwrite");
-    tx.objectStore(SNAPSHOTS).put({ userId, ...structuredClone(snapshot), savedAt: new Date().toISOString() });
+    // IndexedDB already clones values passed to put(). Cloning the complete
+    // account here as well made large notes freeze the interface twice.
+    tx.objectStore(SNAPSHOTS).put({ userId, ...snapshot, savedAt: new Date().toISOString() });
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onerror = tx.onabort = () => { db.close(); reject(tx.error); };
   });
